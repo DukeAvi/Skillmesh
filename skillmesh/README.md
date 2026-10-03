@@ -1,4 +1,4 @@
-# Campus Skill-Swap — Database Layer
+# SkillMesh — Database Layer
 
 A **database-only** demonstration of four storage paradigms working together:
 

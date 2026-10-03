@@ -66,7 +66,7 @@ def main(argv=None):
 
     rows = fetch_leaderboard(args.limit)
     print("=" * 57)
-    print("Campus Skill-Swap leaderboard (completed sessions)")
+    print("SkillMesh leaderboard (completed sessions)")
     print("=" * 57)
     print(render_table(rows))
     print(f"{len(rows)} user(s) ranked.")
