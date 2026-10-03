@@ -1,0 +1,82 @@
+# ---------------------------------------------------------------------------
+# Local-only documentation
+# ---------------------------------------------------------------------------
+# Personal/working documentation - kept out of the repository on purpose.
+documentation.md
+
+# ---------------------------------------------------------------------------
+# Python virtual environment
+# ---------------------------------------------------------------------------
+# Recreated locally with:  python3 -m venv .venv
+# Installs PyTorch + sentence-transformers, so it is ~1 GB. Never commit it.
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Local secrets
+# ---------------------------------------------------------------------------
+# Real credentials go here; .env.example (the tracked template) does not.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Python bytecode / build artefacts
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---------------------------------------------------------------------------
+# Test / type-check / lint caches
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# ---------------------------------------------------------------------------
+# Hugging Face / sentence-transformers model cache
+# ---------------------------------------------------------------------------
+# Default location is ~/.cache/huggingface, but a project-local one may appear
+# if HF_HOME is pointed here. ~80 MB per model.
+hf_cache/
+models/
+.cache/huggingface/
+
+# ---------------------------------------------------------------------------
+# Editor / IDE
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Logs and OS noise
+# ---------------------------------------------------------------------------
+*.log
+*.out
+.DS_Store
+
+# NOTE: pgdata/, neo4jdata/ and redisdata/ are Docker *named volumes*, not
+# directories in this tree, so there is nothing to ignore for them. Data lives
+# outside the repo and is reset with:  docker compose down -v

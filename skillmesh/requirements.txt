@@ -1,0 +1,7 @@
+psycopg[binary]>=3.1
+neo4j>=5.20
+redis>=5.0
+sentence-transformers>=2.7
+python-dotenv>=1.0
+pytest>=8.0
+numpy>=1.26

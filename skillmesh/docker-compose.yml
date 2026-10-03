@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: skillmesh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: skillmesh
+      POSTGRES_PASSWORD: skillmesh
+      POSTGRES_DB: skillmesh
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Every *.sql here runs once, alphabetically, on first boot of an empty pgdata.
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillmesh -d skillmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: skillmesh-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/skillmesh123
+    ports:
+      - "7474:7474"   # HTTP - Neo4j Browser
+      - "7687:7687"   # Bolt - used by the Python driver
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget --no-verbose --tries=1 --spider http://localhost:7474 2>/dev/null
+          || curl -fsS http://localhost:7474 >/dev/null 2>&1
+          || cypher-shell -u neo4j -p skillmesh123 'RETURN 1' >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: skillmesh-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  pgdata:
+  neo4jdata:
+  redisdata:
