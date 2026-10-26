@@ -254,7 +254,7 @@ def main(argv=None):
     stats = sync()
     print("=" * 68)
     print("Neo4j Browser: http://localhost:7474  (neo4j / skillmesh123)")
-    print("Load cypher/02_demo_queries.cypher there for the full write-up.")
+    print("Load cypher/02_demo_queries.cypher there for the full graph demo.")
     if args.demo_queries:
         show_demo_queries()
     return 0 if stats["users"] > 0 and stats["teaches"] > 0 else 1

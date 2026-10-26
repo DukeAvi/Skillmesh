@@ -4,15 +4,14 @@ A **database-only** demonstration of four storage paradigms working together:
 
 | Store | Paradigm | What it proves |
 |---|---|---|
-| PostgreSQL 16 | relational | normalised schema, CHECK / FK / UNIQUE / EXCLUDE constraints, CTE + window function view, `SELECT ... FOR UPDATE` |
+| PostgreSQL 16 | relational | normalised schema, transactions, 2 functions, 2 procedures, constraints, indexes, and a CTE + window-function view |
 | pgvector 0.8 | vector similarity inside PostgreSQL | 384-dim embeddings, cosine distance, HNSW index, semantic skill matching |
 | Neo4j 5 Community | graph | `MERGE`-based sync from PostgreSQL, mentor chains, multi-hop and barter queries |
 | Redis 7 | key-value with TTL | presence heartbeat with `SETEX`, expiry instead of a boolean column |
 
 There is **no web app, no REST API and no frontend**. The deliverables are the
-databases plus scripts that prove they work. Full write-up (with ERD, ASCII
-architecture diagram, formula explanations and a 20-question viva Q&A) is in
-[`documentation.md`](documentation.md).
+databases plus scripts that prove they work. The audit, demo commands, speaking
+notes, and viva Q&A are in [`playbook.md`](playbook.md).
 
 ---
 
@@ -59,7 +58,7 @@ docker compose ps          # postgres / neo4j / redis  ->  (healthy)
 The `postgres` service mounts `./sql` at `/docker-entrypoint-initdb.d`, so on the
 **first** start of an empty `pgdata` volume it runs, in order:
 `01_extensions.sql` → `02_schema.sql` → `03_indexes.sql` →
-`04_leaderboard_view.sql` → `05_seed.sql`.
+`04_leaderboard_view.sql` → `04_routines.sql` → `05_seed.sql`.
 
 To re-run the seed from scratch later:
 
@@ -181,6 +180,14 @@ docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dt'   # 8 table
 docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dv'   # leaderboard view
 docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dx'   # vector + btree_gist
 
+# exactly 2 functions + 2 procedures
+docker compose exec postgres psql -U skillmesh -d skillmesh -c \
+  "SELECT routine_name, routine_type FROM information_schema.routines
+   WHERE routine_schema='public' AND routine_name IN
+   ('fn_find_skill_matches', 'fn_provider_average_rating',
+    'sp_create_swap_request', 'sp_complete_swap_session')
+   ORDER BY routine_type, routine_name;"
+
 # HNSW index
 docker compose exec postgres psql -U skillmesh -d skillmesh -c \
   "SELECT indexdef FROM pg_indexes WHERE indexname='idx_user_skills_embedding';"
@@ -226,13 +233,14 @@ skillmesh/
 ├── docker-compose.yml      # postgres (pgvector/pgvector:pg16) + neo4j + redis
 ├── .env.example            # optional overrides; scripts/config.py has defaults
 ├── README.md               # this file
-├── documentation.md        # full technical write-up + viva Q&A
+├── playbook.md             # audited demo script + speaking notes + viva Q&A
 ├── requirements.txt
 ├── sql/
 │   ├── 01_extensions.sql   # vector, btree_gist
 │   ├── 02_schema.sql       # 8 tables + constraints
 │   ├── 03_indexes.sql      # btree indexes + HNSW on user_skills.embedding
 │   ├── 04_leaderboard_view.sql
+│   ├── 04_routines.sql     # exactly 2 functions + 2 procedures
 │   └── 05_seed.sql         # embedding column deliberately left NULL
 ├── cypher/
 │   ├── 01_constraints.cypher
@@ -251,7 +259,8 @@ skillmesh/
     ├── test_pgvector.py
     ├── test_concurrency.py
     ├── test_presence.py
-    └── test_graph.py
+    ├── test_graph.py
+    └── test_routines.py
 ```
 
 ---

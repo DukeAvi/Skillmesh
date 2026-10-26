@@ -15,6 +15,7 @@ import pytest
 
 from scripts.config import pg_connect
 from scripts.embeddings import backend, embed, embedding_literal
+from scripts.match import find_matches
 
 # Two sentences that mean the same thing -> should be close in vector space.
 PHRASE_A = "teach advanced python programming and machine learning to beginners"
@@ -163,5 +164,26 @@ def test_nearest_neighbour_search_is_ordered(probes):
         assert ranked[1][0] == probes["user_skill_ids"][1]  # the close paraphrase
         assert ranked[-1][0] == probes["user_skill_ids"][2]  # the bread one
         assert ranked[0][1] > ranked[1][1] > ranked[2][1]
+    finally:
+        conn.close()
+
+
+def test_application_match_limit_is_honoured():
+    """The CLI's --limit value must reach SQL instead of being hard-coded."""
+    conn = pg_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.user_id, s.skill_id
+                FROM users u
+                CROSS JOIN skills s
+                WHERE u.email = 'aarav.sharma@campus.edu'
+                  AND s.name = 'Guitar'
+                """
+            )
+            learner_id, skill_id = cur.fetchone()
+        _, matches = find_matches(learner_id, skill_id, limit=3, conn=conn)
+        assert len(matches) == 3
     finally:
         conn.close()

@@ -2,7 +2,7 @@
 # Local-only documentation
 # ---------------------------------------------------------------------------
 # Personal/working documentation - kept out of the repository on purpose.
-documentation.md
+playbook.md
 
 # ---------------------------------------------------------------------------
 # Python virtual environment
@@ -77,6 +77,4 @@ Thumbs.db
 *.out
 .DS_Store
 
-# NOTE: pgdata/, neo4jdata/ and redisdata/ are Docker *named volumes*, not
-# directories in this tree, so there is nothing to ignore for them. Data lives
-# outside the repo and is reset with:  docker compose down -v
+

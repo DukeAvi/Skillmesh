@@ -36,7 +36,7 @@ MATCH_SQL = """
     WHERE us.skill_type = 'TEACH'
       AND us.user_id <> %s
     ORDER BY us.embedding <=> %s
-    LIMIT 10;
+    LIMIT %s;
 """
 
 INSERT_REQUEST = """
@@ -48,6 +48,7 @@ INSERT_REQUEST = """
 
 def find_matches(learner_id, skill_id, limit=10, conn=None):
     """Return the ranked TEACH matches for a learner/skill pair."""
+    safe_limit = max(1, min(int(limit), 50))
     own_conn = conn is None
     conn = conn or pg_connect()
     try:
@@ -68,7 +69,7 @@ def find_matches(learner_id, skill_id, limit=10, conn=None):
 
             query_vector = embedding_literal(embed(skill_name))
 
-            cur.execute(MATCH_SQL, (query_vector, learner_id, query_vector))
+            cur.execute(MATCH_SQL, (query_vector, learner_id, query_vector, safe_limit))
             return skill_name, cur.fetchall()
     finally:
         if own_conn:
