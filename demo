@@ -1,0 +1,1318 @@
+#!/usr/bin/env python3
+"""Short, presentation-friendly entry point for the SkillMesh demo."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
+if (
+    sys.prefix == sys.base_prefix
+    and VENV_PYTHON.exists()
+):
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+PYTHON = sys.executable
+DEMO_EMAIL = "avrit@gmail.com"
+DEMO_SKILL = "Public Speaking"
+
+
+def heading(title: str) -> None:
+    print(f"\n{'=' * 68}\n{title}\n{'=' * 68}", flush=True)
+
+
+def section(title: str) -> None:
+    """Print a lightweight section label for compact command output."""
+    print(f"\n{title}", flush=True)
+
+
+def run(*command: str) -> None:
+    sys.stdout.flush()
+    subprocess.run(command, cwd=ROOT, check=True)
+
+
+def query_rows(sql: str, params=()):
+    from scripts.config import pg_connect
+
+    with pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            columns = [column.name for column in cur.description]
+            return columns, cur.fetchall()
+
+
+def print_table(columns, rows) -> None:
+    text_rows = [[str(value) for value in row] for row in rows]
+    widths = [len(column) for column in columns]
+    for row in text_rows:
+        widths = [max(width, len(value)) for width, value in zip(widths, row)]
+
+    def line(values):
+        return " | ".join(value.ljust(width) for value, width in zip(values, widths))
+
+    print(line(columns))
+    print("-+-".join("-" * width for width in widths))
+    for row in text_rows:
+        print(line(row))
+
+
+class UserInputError(ValueError):
+    """Raised when the interactive add-user command receives invalid input."""
+
+
+def prompt_value(label: str, supplied=None, *, default=None, required=False) -> str:
+    """Return a CLI value, prompting only when the corresponding flag was omitted."""
+    if supplied is not None:
+        value = str(supplied).strip()
+        if value or not required:
+            return value
+
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        try:
+            value = input(f"{label}{suffix}: ").strip()
+        except EOFError as exc:
+            raise UserInputError(
+                f"{label} is required; pass it as a command-line option"
+            ) from exc
+        if value:
+            return value
+        if default is not None:
+            return str(default)
+        if not required:
+            return ""
+        print(f"{label} cannot be empty.")
+
+
+def prompt_choice(label: str, supplied, choices, default: str) -> str:
+    """Prompt until one of the allowed case-insensitive values is entered."""
+    if supplied is not None:
+        return supplied
+    allowed = {choice.lower(): choice for choice in choices}
+    while True:
+        value = prompt_value(
+            f"{label} ({'/'.join(choices)})", default=default, required=True
+        ).lower()
+        if value in allowed:
+            return allowed[value]
+        print(f"Choose one of: {', '.join(choices)}.")
+
+
+def prompt_year(supplied=None):
+    """Read an optional year of study and enforce the database's 1..6 constraint."""
+    if supplied is not None:
+        return supplied
+    while True:
+        value = prompt_value("Year of study (1-6, optional)")
+        if not value:
+            return None
+        try:
+            year = int(value)
+        except ValueError:
+            print("Year of study must be a number from 1 to 6.")
+            continue
+        if 1 <= year <= 6:
+            return year
+        print("Year of study must be between 1 and 6.")
+
+
+def match_limit(value: str) -> int:
+    """Argparse converter for the match function's supported result range."""
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number from 1 to 50") from exc
+    if not 1 <= limit <= 50:
+        raise argparse.ArgumentTypeError("must be between 1 and 50")
+    return limit
+
+
+def show_routines() -> None:
+    section("1. Stored routines")
+    columns, rows = query_rows(
+        """
+        SELECT routine_name, routine_type
+        FROM information_schema.routines
+        WHERE routine_schema = 'public'
+          AND routine_name IN (
+              'fn_find_skill_matches', 'fn_provider_average_rating',
+              'sp_create_swap_request', 'sp_complete_swap_session'
+          )
+        ORDER BY routine_type, routine_name
+        """
+    )
+    print_table(columns, rows)
+
+
+def show_functions() -> None:
+    section("2. Read-only functions")
+    print("Teacher matches for Aarav learning Guitar:")
+    columns, rows = query_rows(
+        """
+        SELECT provider_id, provider_name, matched_skill, round(similarity::numeric, 4) AS similarity
+        FROM fn_find_skill_matches(1::BIGINT, 5::BIGINT, 5)
+        """
+    )
+    print_table(columns, rows)
+    _, rows = query_rows(
+        "SELECT fn_provider_average_rating(2::BIGINT) AS diya_rating"
+    )
+    print(f"\nDiya Patel's learner rating: {rows[0][0]}")
+
+
+def show_procedures() -> None:
+    from scripts.config import pg_connect
+
+    section("3. Transactional procedures")
+    conn = pg_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("BEGIN")
+            cur.execute(
+                "CALL sp_create_swap_request(%s::BIGINT, %s::BIGINT, %s::BIGINT, "
+                "%s::REAL, NULL::BIGINT)",
+                (1, 4, 5, 0.95),
+            )
+            request_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                SELECT request_id, requester_id, provider_id, skill_id, status
+                FROM swap_requests WHERE request_id = %s
+                """,
+                (request_id,),
+            )
+            print("Create request:")
+            print_table([column.name for column in cur.description], cur.fetchall())
+
+            cur.execute(
+                "UPDATE swap_sessions SET status = 'scheduled', completed_at = NULL "
+                "WHERE session_id = 1"
+            )
+            cur.execute("CALL sp_complete_swap_session(1::BIGINT)")
+            cur.execute(
+                """
+                SELECT session_id, status,
+                       completed_at IS NOT NULL AS has_completion_time
+                FROM swap_sessions WHERE session_id = 1
+                """
+            )
+            print("\nComplete session:")
+            print_table([column.name for column in cur.description], cur.fetchall())
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("ROLLBACK")
+        conn.close()
+    print("\nDemo transaction rolled back; seeded data is unchanged.")
+
+
+def show_index() -> None:
+    heading("HNSW vector index")
+    columns, rows = query_rows(
+        """
+        SELECT indexname, indexdef
+        FROM pg_indexes
+        WHERE indexname = 'idx_user_skills_embedding'
+        """
+    )
+    print_table(columns, rows)
+
+
+def postgres_demo() -> None:
+    print("\nPostgreSQL demo", flush=True)
+    show_routines()
+    show_functions()
+    show_procedures()
+    run(PYTHON, "scripts/leaderboard.py", "--title", "4. Leaderboard view")
+
+
+def match_demo() -> None:
+    heading("Semantic vector matching")
+    run(PYTHON, "scripts/match.py", "--learner", "1", "--skill", "5", "--limit", "5")
+    show_index()
+
+
+def cleanup(verbose: bool = True) -> None:
+    """Remove only rows created by ``app_demo``; preserve all seed data."""
+    from scripts.config import neo4j_driver, pg_connect, redis_client
+
+    user_id = None
+    with pg_connect() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users WHERE email = %s", (DEMO_EMAIL,))
+                row = cur.fetchone()
+                user_id = row[0] if row else None
+                cur.execute("DELETE FROM users WHERE email = %s", (DEMO_EMAIL,))
+                deleted_users = cur.rowcount
+                cur.execute("DELETE FROM skills WHERE name = %s", (DEMO_SKILL,))
+                deleted_skills = cur.rowcount
+
+    # The graph is a derived read model and Redis is ephemeral, so cleanup is
+    # best-effort when either optional service is not currently available.
+    try:
+        driver = neo4j_driver()
+        try:
+            with driver.session() as session:
+                session.run(
+                    "MATCH (u:User {email: $email}) DETACH DELETE u",
+                    email=DEMO_EMAIL,
+                ).consume()
+                session.run(
+                    "MATCH (s:Skill {name: $name}) DETACH DELETE s",
+                    name=DEMO_SKILL,
+                ).consume()
+        finally:
+            driver.close()
+        graph_status = "clean"
+    except Exception as exc:
+        graph_status = f"skipped ({type(exc).__name__}: service unavailable)"
+
+    try:
+        client = redis_client()
+        try:
+            if user_id is not None:
+                client.delete(f"online:{user_id}")
+        finally:
+            client.close()
+        redis_status = "clean"
+    except Exception as exc:
+        redis_status = f"skipped ({type(exc).__name__}: service unavailable)"
+
+    if verbose:
+        heading("Demo cleanup")
+        print(f"PostgreSQL demo users removed : {deleted_users}")
+        print(f"PostgreSQL demo skills removed: {deleted_skills}")
+        print(f"Neo4j projection              : {graph_status}")
+        print(f"Redis presence                : {redis_status}")
+        print("Seeded users, skills, sessions, and feedback were preserved.")
+
+
+def app_demo() -> None:
+    """Run a small, persistent CLI journey through the core product tables."""
+    from scripts.config import pg_connect
+    from scripts.embeddings import embed, embedding_literal
+
+    # Make the walkthrough repeatable without resetting Docker volumes.
+    cleanup(verbose=False)
+
+    heading("CLI app walkthrough: user -> skills -> match -> request")
+    with pg_connect() as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                print("[1/5] Creating a student account")
+                cur.execute(
+                    """
+                    INSERT INTO users
+                        (name, email, password_hash, role, department, year_of_study, bio)
+                    VALUES
+                        (%s, %s, %s, 'student', 'Information Systems', 2, %s)
+                    RETURNING user_id, name, email, role
+                    """,
+                    (
+                        "Avrit Sharma",
+                        DEMO_EMAIL,
+                        "demo-only-placeholder-hash",
+                        "Created live during the SkillMesh viva walkthrough.",
+                    ),
+                )
+                user_row = cur.fetchone()
+                user_id = user_row[0]
+                print_table([column.name for column in cur.description], [user_row])
+
+                print("\n[2/5] Adding a new skill to the catalogue")
+                cur.execute(
+                    """
+                    INSERT INTO skills (category_id, name, description)
+                    VALUES (
+                        (SELECT category_id FROM skill_categories WHERE name = 'Languages'),
+                        %s,
+                        'Presenting ideas clearly to an audience with confident delivery.'
+                    )
+                    RETURNING skill_id, name, description
+                    """,
+                    (DEMO_SKILL,),
+                )
+                new_skill_row = cur.fetchone()
+                public_speaking_id = new_skill_row[0]
+                print_table([column.name for column in cur.description], [new_skill_row])
+
+                cur.execute("SELECT skill_id FROM skills WHERE name = 'Guitar'")
+                guitar_id = cur.fetchone()[0]
+
+                print("\n[3/5] Registering one TEACH skill and one LEARN skill")
+                skill_rows = [
+                    (
+                        public_speaking_id,
+                        "TEACH",
+                        "advanced",
+                        "I teach public speaking, presentation structure and confident delivery.",
+                    ),
+                    (
+                        guitar_id,
+                        "LEARN",
+                        "beginner",
+                        "I want to learn guitar chords, strumming and beginner fingerpicking.",
+                    ),
+                ]
+                for skill_id, skill_type, proficiency, description in skill_rows:
+                    cur.execute(
+                        """
+                        INSERT INTO user_skills
+                            (user_id, skill_id, skill_type, proficiency_level,
+                             description, embedding)
+                        VALUES (%s, %s, %s, %s, %s, %s::vector)
+                        """,
+                        (
+                            user_id,
+                            skill_id,
+                            skill_type,
+                            proficiency,
+                            description,
+                            embedding_literal(embed(description)),
+                        ),
+                    )
+                cur.execute(
+                    """
+                    SELECT s.name AS skill, us.skill_type, us.proficiency_level,
+                           vector_dims(us.embedding) AS dimensions
+                    FROM user_skills us
+                    JOIN skills s ON s.skill_id = us.skill_id
+                    WHERE us.user_id = %s
+                    ORDER BY us.skill_type DESC
+                    """,
+                    (user_id,),
+                )
+                print_table([column.name for column in cur.description], cur.fetchall())
+
+                print("\n[4/5] Finding teachers with the vector-match function")
+                cur.execute(
+                    """
+                    SELECT provider_id, provider_name, matched_skill_id,
+                           matched_skill, round(similarity::numeric, 4) AS similarity
+                    FROM fn_find_skill_matches(%s::BIGINT, %s::BIGINT, 5)
+                    """,
+                    (user_id, guitar_id),
+                )
+                matches = cur.fetchall()
+                match_columns = [column.name for column in cur.description]
+                print_table(match_columns, matches)
+                exact_matches = [row for row in matches if row[2] == guitar_id]
+                if not exact_matches:
+                    raise RuntimeError("no Guitar teacher was returned by the match function")
+                chosen = exact_matches[0]
+
+                print("\n[5/5] Sending the chosen teacher a validated request")
+                cur.execute(
+                    "CALL sp_create_swap_request(%s::BIGINT, %s::BIGINT, %s::BIGINT, "
+                    "%s::REAL, NULL::BIGINT)",
+                    (user_id, chosen[0], guitar_id, float(chosen[4])),
+                )
+                request_id = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    SELECT r.request_id, learner.name AS requester,
+                           teacher.name AS provider, s.name AS skill, r.status
+                    FROM swap_requests r
+                    JOIN users learner ON learner.user_id = r.requester_id
+                    JOIN users teacher ON teacher.user_id = r.provider_id
+                    JOIN skills s ON s.skill_id = r.skill_id
+                    WHERE r.request_id = %s
+                    """,
+                    (request_id,),
+                )
+                print_table([column.name for column in cur.description], cur.fetchall())
+
+    print("\nWalkthrough data was committed for inspection.")
+    print("Run './demo cleanup' before repeating it or starting the formal demo.")
+
+
+def add_user(args) -> None:
+    """Add a teaching or learning skill and rank users on the opposite side."""
+    heading("Add a user skill and find a match")
+    print("Starting PostgreSQL if needed...")
+    run("docker", "compose", "up", "-d", "--wait", "postgres")
+
+    from scripts.config import pg_connect
+    from scripts.embeddings import embed, embedding_literal
+    from scripts.seed_postgres import build_text, seed_embeddings
+
+    name = prompt_value("Full name", args.name, required=True)
+    email = prompt_value("Email", args.email, required=True).lower()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise UserInputError("Email must look like name@example.com")
+    password_hash = prompt_value(
+        "Password hash (authentication is not implemented)",
+        args.password_hash,
+        default="manual-cli-placeholder-hash",
+        required=True,
+    )
+    role = prompt_choice(
+        "Role", args.role, ("student", "mentor", "admin"), "student"
+    )
+    skill_type = args.skill_type or ("TEACH" if role == "mentor" else "LEARN")
+    if args.create_request and skill_type == "TEACH":
+        raise UserInputError(
+            "--create-request is only valid for LEARN entries because learners "
+            "initiate swap requests"
+        )
+    print(
+        f"Skill mode: {skill_type} "
+        f"({'mentor default' if role == 'mentor' else 'account default'}; "
+        f"override with --skill-type if needed)."
+    )
+    department = prompt_value("Department (optional)", args.department)
+    year_of_study = prompt_year(args.year_of_study)
+    bio = prompt_value("Bio (optional)", args.bio)
+
+    conn = pg_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.skill_id, s.name,
+                       COUNT(us.user_skill_id) FILTER (
+                           WHERE us.skill_type = 'TEACH'
+                       ) AS teachers,
+                       COUNT(us.user_skill_id) FILTER (
+                           WHERE us.skill_type = 'LEARN'
+                       ) AS learners
+                FROM skills s
+                LEFT JOIN user_skills us ON us.skill_id = s.skill_id
+                GROUP BY s.skill_id, s.name
+                ORDER BY s.name
+                """
+            )
+            available_skills = cur.fetchall()
+
+        if not available_skills:
+            raise UserInputError(
+                "No skills exist in the catalogue; seed the database before adding a user skill"
+            )
+
+        if args.skill is None:
+            print("\nAvailable skills (enter a skill ID or its exact name):")
+            print_table(("skill_id", "skill", "teachers", "learners"), available_skills)
+        action_word = "teach" if skill_type == "TEACH" else "learn"
+        requested_skill = prompt_value(
+            f"Skill to {action_word}", args.skill, required=True
+        )
+
+        selected_skill = None
+        for skill_id, skill_name, teacher_count, learner_count in available_skills:
+            if requested_skill.casefold() == skill_name.casefold() or (
+                requested_skill.isdigit() and int(requested_skill) == skill_id
+            ):
+                selected_skill = (
+                    skill_id,
+                    skill_name,
+                    teacher_count,
+                    learner_count,
+                )
+                break
+        if selected_skill is None:
+            raise UserInputError(
+                f"Unknown skill {requested_skill!r}; choose an ID or name from the catalogue"
+            )
+
+        skill_id, skill_name, teacher_count, learner_count = selected_skill
+        proficiency = prompt_choice(
+            "Current proficiency",
+            args.proficiency,
+            ("beginner", "intermediate", "advanced"),
+            "beginner",
+        )
+        description = prompt_value(
+            "What can you teach?" if skill_type == "TEACH" else "What do you want to learn?",
+            args.description,
+            default=(
+                f"I can teach {skill_name}."
+                if skill_type == "TEACH"
+                else f"I want to learn {skill_name}."
+            ),
+            required=True,
+        )
+
+        print("\nGenerating the skill embedding and filling any missing embeddings...")
+        skill_embedding = embedding_literal(
+            embed(build_text(skill_name, description))
+        )
+
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+                existing = cur.fetchone()
+                cur.execute(
+                    """
+                    INSERT INTO users (
+                        name, email, password_hash, role, department,
+                        year_of_study, bio
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (email) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        password_hash = EXCLUDED.password_hash,
+                        role = EXCLUDED.role,
+                        department = EXCLUDED.department,
+                        year_of_study = EXCLUDED.year_of_study,
+                        bio = EXCLUDED.bio
+                    RETURNING user_id
+                    """,
+                    (
+                        name,
+                        email,
+                        password_hash,
+                        role,
+                        department or None,
+                        year_of_study,
+                        bio or None,
+                    ),
+                )
+                user_id = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    INSERT INTO user_skills (
+                        user_id, skill_id, skill_type, proficiency_level,
+                        description, embedding
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s::vector)
+                    ON CONFLICT (user_id, skill_id, skill_type) DO UPDATE SET
+                        proficiency_level = EXCLUDED.proficiency_level,
+                        description = EXCLUDED.description,
+                        embedding = EXCLUDED.embedding
+                    """,
+                    (
+                        user_id,
+                        skill_id,
+                        skill_type,
+                        proficiency,
+                        description,
+                        skill_embedding,
+                    ),
+                )
+
+            # A fresh Docker volume has seeded rows with NULL vectors. Fill them
+            # here so this one command is sufficient for either match direction.
+            seed_embeddings(conn=conn)
+
+            with conn.cursor() as cur:
+                counterpart_type = "TEACH" if skill_type == "LEARN" else "LEARN"
+                cur.execute(
+                    """
+                    WITH source AS (
+                        SELECT embedding
+                        FROM user_skills
+                        WHERE user_id = %s
+                          AND skill_id = %s
+                          AND skill_type = %s
+                    )
+                    SELECT candidate.user_id, u.name, candidate.skill_id,
+                           s.name,
+                           1 - (candidate.embedding <=> source.embedding) AS similarity
+                    FROM source
+                    CROSS JOIN user_skills candidate
+                    JOIN users u ON u.user_id = candidate.user_id
+                    JOIN skills s ON s.skill_id = candidate.skill_id
+                    WHERE candidate.skill_type = %s
+                      AND candidate.user_id <> %s
+                      AND candidate.embedding IS NOT NULL
+                    ORDER BY candidate.embedding <=> source.embedding,
+                             candidate.user_skill_id
+                    LIMIT %s
+                    """,
+                    (
+                        user_id,
+                        skill_id,
+                        skill_type,
+                        counterpart_type,
+                        user_id,
+                        args.limit,
+                    ),
+                )
+                matches = cur.fetchall()
+                cur.execute(
+                    """
+                    WITH source AS (
+                        SELECT embedding
+                        FROM user_skills
+                        WHERE user_id = %s
+                          AND skill_id = %s
+                          AND skill_type = %s
+                    )
+                    SELECT candidate.user_id, u.name, candidate.skill_id,
+                           s.name,
+                           1 - (candidate.embedding <=> source.embedding) AS similarity
+                    FROM source
+                    CROSS JOIN user_skills candidate
+                    JOIN users u ON u.user_id = candidate.user_id
+                    JOIN skills s ON s.skill_id = candidate.skill_id
+                    WHERE candidate.skill_type = %s
+                      AND candidate.skill_id = %s
+                      AND candidate.user_id <> %s
+                      AND candidate.embedding IS NOT NULL
+                    ORDER BY candidate.embedding <=> source.embedding,
+                             candidate.user_skill_id
+                    """,
+                    (
+                        user_id,
+                        skill_id,
+                        skill_type,
+                        counterpart_type,
+                        skill_id,
+                        user_id,
+                    ),
+                )
+                exact_matches = cur.fetchall()
+                request_id = None
+                if args.create_request:
+                    if not exact_matches:
+                        raise UserInputError(
+                            f"No exact {skill_name} teacher is available; "
+                            "a request was not created"
+                        )
+                    chosen = exact_matches[0]
+                    cur.execute(
+                        "CALL sp_create_swap_request(%s::BIGINT, %s::BIGINT, "
+                        "%s::BIGINT, %s::REAL, NULL::BIGINT)",
+                        (user_id, chosen[0], skill_id, float(chosen[4])),
+                    )
+                    request_id = cur.fetchone()[0]
+
+        action = "Updated" if existing else "Created"
+        counterpart_label = "teacher" if skill_type == "LEARN" else "learner"
+        exact_count = teacher_count if skill_type == "LEARN" else learner_count
+        print(f"\n{action} user {name} (user_id={user_id}).")
+        print(
+            f"Saved {skill_type} {'goal' if skill_type == 'LEARN' else 'offering'}: "
+            f"{skill_name} ({proficiency}); catalogue has {exact_count} exact "
+            f"{counterpart_label}(s)."
+        )
+        if matches:
+            display_matches = [
+                (
+                    rank,
+                    row[0],
+                    row[1],
+                    row[3],
+                    "yes" if row[2] == skill_id else "no",
+                    f"{float(row[4]):.4f}",
+                )
+                for rank, row in enumerate(matches, 1)
+            ]
+            print(f"\nRanked semantic {counterpart_label} matches:")
+            print_table(
+                (
+                    "#",
+                    "user_id",
+                    counterpart_label,
+                    "matched skill",
+                    "exact",
+                    "similarity",
+                ),
+                display_matches,
+            )
+        else:
+            print(
+                f"\nNo {counterpart_label}s with embeddings are currently available."
+            )
+
+        if request_id is not None:
+            print(f"\nCreated pending swap_request {request_id} for {exact_matches[0][1]}.")
+        elif exact_matches:
+            message = (
+                "\nBest exact match: "
+                f"{exact_matches[0][1]} (user_id={exact_matches[0][0]})."
+            )
+            if skill_type == "LEARN":
+                message += " Next: run ./demo create-request."
+            print(message)
+    finally:
+        conn.close()
+
+
+def _select_skill(rows, requested, prompt_label):
+    """Select a skill row by numeric ID or case-insensitive exact name."""
+    value = prompt_value(prompt_label, requested, required=True)
+    for row in rows:
+        skill_id, skill_name = row[:2]
+        if value.casefold() == skill_name.casefold() or (
+            value.isdigit() and int(value) == skill_id
+        ):
+            return row
+    raise UserInputError(
+        f"Unknown skill {value!r}; choose an ID or name from the displayed list"
+    )
+
+
+def _learner_and_skill(conn, user_arg, skill_arg):
+    """Resolve an existing learner and one of their LEARN skills."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT u.user_id, u.name, u.email, COUNT(*) AS learn_skills
+            FROM users u
+            JOIN user_skills us ON us.user_id = u.user_id
+            WHERE us.skill_type = 'LEARN'
+            GROUP BY u.user_id, u.name, u.email
+            ORDER BY u.name, u.user_id
+            """
+        )
+        learners = cur.fetchall()
+    if not learners:
+        raise UserInputError(
+            "No users have LEARN skills; run ./demo add-user first"
+        )
+
+    if user_arg is None:
+        print("\nLearners available for matching:")
+        print_table(("user_id", "name", "email", "LEARN skills"), learners)
+    selector = prompt_value(
+        "Learner name, user ID, or email", user_arg, required=True
+    )
+    selected_users = [
+        row
+        for row in learners
+        if selector == str(row[0])
+        or selector.casefold() == row[1].casefold()
+        or selector.casefold() == row[2].casefold()
+    ]
+    if not selected_users:
+        raise UserInputError(
+            f"No learner matching {selector!r}; choose from the displayed list"
+        )
+    if len(selected_users) > 1:
+        raise UserInputError(
+            f"More than one learner is named {selector!r}; select by user ID or email"
+        )
+
+    user_id, user_name, email, _ = selected_users[0]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT s.skill_id, s.name, us.proficiency_level, us.description
+            FROM user_skills us
+            JOIN skills s ON s.skill_id = us.skill_id
+            WHERE us.user_id = %s
+              AND us.skill_type = 'LEARN'
+            ORDER BY s.name
+            """,
+            (user_id,),
+        )
+        skill_rows = cur.fetchall()
+    if skill_arg is None:
+        print(f"\nLEARN skills for {user_name}:")
+        print_table(
+            ("skill_id", "skill", "proficiency", "description"), skill_rows
+        )
+    selected = _select_skill(skill_rows, skill_arg, "Skill to match")
+    return email, user_id, user_name, selected[0], selected[1]
+
+
+def _rank_teachers(conn, learner_id, skill_id, limit):
+    """Return semantic results plus every exact-skill teacher."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT provider_id, provider_name, matched_skill_id,
+                   matched_skill, similarity
+            FROM fn_find_skill_matches(%s::BIGINT, %s::BIGINT, %s)
+            """,
+            (learner_id, skill_id, limit),
+        )
+        matches = cur.fetchall()
+        cur.execute(
+            """
+            WITH learner AS (
+                SELECT embedding
+                FROM user_skills
+                WHERE user_id = %s
+                  AND skill_id = %s
+                  AND skill_type = 'LEARN'
+            )
+            SELECT teacher.user_id, u.name, u.email,
+                   1 - (teacher.embedding <=> learner.embedding) AS similarity
+            FROM learner
+            CROSS JOIN user_skills teacher
+            JOIN users u ON u.user_id = teacher.user_id
+            WHERE teacher.skill_type = 'TEACH'
+              AND teacher.skill_id = %s
+              AND teacher.user_id <> %s
+              AND teacher.embedding IS NOT NULL
+            ORDER BY teacher.embedding <=> learner.embedding,
+                     teacher.user_skill_id
+            """,
+            (learner_id, skill_id, skill_id, learner_id),
+        )
+        exact_teachers = cur.fetchall()
+    return matches, exact_teachers
+
+
+def _print_teacher_matches(matches, requested_skill_id):
+    """Render semantic teacher matches with exact-skill markers."""
+    if not matches:
+        print("\nNo teachers with embeddings are currently available.")
+        return
+    display_rows = [
+        (
+            rank,
+            row[0],
+            row[1],
+            row[3],
+            "yes" if row[2] == requested_skill_id else "no",
+            f"{float(row[4]):.4f}",
+        )
+        for rank, row in enumerate(matches, 1)
+    ]
+    print("\nRanked semantic teacher matches:")
+    print_table(
+        ("#", "user_id", "teacher", "matched skill", "exact", "similarity"),
+        display_rows,
+    )
+
+
+def find_match(args) -> None:
+    """Find teachers for an existing user's LEARN skill without writing a request."""
+    heading("Find a teacher for an existing learner")
+    run("docker", "compose", "up", "-d", "--wait", "postgres")
+
+    from scripts.config import pg_connect
+    from scripts.seed_postgres import seed_embeddings
+
+    conn = pg_connect()
+    try:
+        email, learner_id, learner_name, skill_id, skill_name = _learner_and_skill(
+            conn, args.user, args.skill
+        )
+        seed_embeddings(conn=conn)
+        matches, exact_teachers = _rank_teachers(
+            conn, learner_id, skill_id, args.limit
+        )
+        print(
+            f"\nLearner: {learner_name} ({email}, user_id={learner_id})\n"
+            f"Requested skill: {skill_name} (skill_id={skill_id})"
+        )
+        _print_teacher_matches(matches, skill_id)
+        if exact_teachers:
+            best = exact_teachers[0]
+            print(
+                f"\nBest exact teacher: {best[1]} "
+                f"(user_id={best[0]}, similarity={float(best[3]):.4f})."
+            )
+            print("Next: run ./demo create-request")
+        else:
+            print(f"\nNo teacher currently offers the exact skill {skill_name}.")
+    finally:
+        conn.close()
+
+
+def create_request(args) -> None:
+    """Create a pending request from an existing learner to an exact teacher."""
+    heading("Create a pending skill-swap request")
+    run("docker", "compose", "up", "-d", "--wait", "postgres")
+
+    from scripts.config import pg_connect
+    from scripts.seed_postgres import seed_embeddings
+
+    conn = pg_connect()
+    try:
+        email, learner_id, learner_name, skill_id, skill_name = _learner_and_skill(
+            conn, args.learner, args.skill
+        )
+        seed_embeddings(conn=conn)
+        _, exact_teachers = _rank_teachers(conn, learner_id, skill_id, 50)
+        if not exact_teachers:
+            raise UserInputError(f"No teacher currently offers {skill_name}")
+
+        teacher_rows = [
+            (row[0], row[1], row[2], f"{float(row[3]):.4f}")
+            for row in exact_teachers
+        ]
+        if args.provider is None:
+            print(f"\nExact {skill_name} teachers:")
+            print_table(("user_id", "teacher", "email", "similarity"), teacher_rows)
+        provider_value = prompt_value(
+            "Teacher user ID or email",
+            args.provider,
+            default=str(exact_teachers[0][0]),
+            required=True,
+        )
+        chosen = None
+        for row in exact_teachers:
+            if provider_value == str(row[0]) or provider_value.casefold() == row[2].casefold():
+                chosen = row
+                break
+        if chosen is None:
+            raise UserInputError(
+                f"Teacher {provider_value!r} does not offer the exact skill {skill_name}"
+            )
+
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT request_id
+                    FROM swap_requests
+                    WHERE requester_id = %s
+                      AND provider_id = %s
+                      AND skill_id = %s
+                      AND status = 'pending'
+                    ORDER BY request_id DESC
+                    LIMIT 1
+                    """,
+                    (learner_id, chosen[0], skill_id),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    request_id = existing[0]
+                    created = False
+                else:
+                    cur.execute(
+                        "CALL sp_create_swap_request(%s::BIGINT, %s::BIGINT, "
+                        "%s::BIGINT, %s::REAL, NULL::BIGINT)",
+                        (learner_id, chosen[0], skill_id, float(chosen[3])),
+                    )
+                    request_id = cur.fetchone()[0]
+                    created = True
+
+        action = "Created" if created else "Reused existing"
+        print(
+            f"\n{action} pending request {request_id}: "
+            f"{learner_name} -> {chosen[1]} for {skill_name} "
+            f"(similarity={float(chosen[3]):.4f})."
+        )
+        print("Next: the teacher can run ./demo accept-request")
+    finally:
+        conn.close()
+
+
+def accept_request(args) -> None:
+    """Accept a pending request after selecting its provider."""
+    heading("Accept an incoming skill-swap request")
+    run("docker", "compose", "up", "-d", "--wait", "postgres")
+
+    from scripts.config import pg_connect
+
+    conn = pg_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT provider.user_id, provider.name, provider.email,
+                       COUNT(*) AS pending_requests
+                FROM swap_requests r
+                JOIN users provider ON provider.user_id = r.provider_id
+                WHERE r.status = 'pending'
+                GROUP BY provider.user_id, provider.name, provider.email
+                ORDER BY provider.name, provider.user_id
+                """
+            )
+            providers = cur.fetchall()
+        if not providers:
+            raise UserInputError("No teachers currently have pending requests")
+        if args.provider is None:
+            print("\nTeachers with pending incoming requests:")
+            print_table(
+                ("user_id", "teacher", "email", "pending requests"), providers
+            )
+        selector = prompt_value(
+            "Teacher name, user ID, or email", args.provider, required=True
+        )
+        selected_providers = [
+            row
+            for row in providers
+            if selector == str(row[0])
+            or selector.casefold() == row[1].casefold()
+            or selector.casefold() == row[2].casefold()
+        ]
+        if not selected_providers:
+            raise UserInputError(
+                f"No teacher matching {selector!r} has a pending request"
+            )
+        if len(selected_providers) > 1:
+            raise UserInputError(
+                f"More than one teacher is named {selector!r}; "
+                "select by user ID or email"
+            )
+        provider_id, provider_name, provider_email, _ = selected_providers[0]
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.request_id, learner.name, learner.email,
+                       s.name, round(r.similarity_score::numeric, 4), r.status
+                FROM swap_requests r
+                JOIN users learner ON learner.user_id = r.requester_id
+                JOIN skills s ON s.skill_id = r.skill_id
+                WHERE r.provider_id = %s
+                  AND r.status = 'pending'
+                ORDER BY r.request_id
+                """,
+                (provider_id,),
+            )
+            pending = cur.fetchall()
+        if args.request_id is None:
+            print(f"\nPending incoming requests for {provider_name}:")
+            print_table(
+                ("request_id", "learner", "email", "skill", "similarity", "status"),
+                pending,
+            )
+        request_value = prompt_value(
+            "Request ID",
+            args.request_id,
+            default=str(pending[0][0]),
+            required=True,
+        )
+        if not request_value.isdigit():
+            raise UserInputError("Request ID must be a number")
+        request_id = int(request_value)
+        if request_id not in {row[0] for row in pending}:
+            raise UserInputError(
+                f"Request {request_id} is not pending for {provider_email!r}"
+            )
+
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE swap_requests r
+                    SET status = 'accepted'
+                    WHERE r.request_id = %s
+                      AND r.provider_id = %s
+                      AND r.status = 'pending'
+                    RETURNING r.requester_id, r.provider_id, r.skill_id
+                    """,
+                    (request_id, provider_id),
+                )
+                accepted = cur.fetchone()
+                if accepted is None:
+                    raise UserInputError(
+                        f"Request {request_id} could not be accepted"
+                    )
+                cur.execute(
+                    """
+                    SELECT learner.name, provider.name, s.name
+                    FROM users learner
+                    CROSS JOIN users provider
+                    CROSS JOIN skills s
+                    WHERE learner.user_id = %s
+                      AND provider.user_id = %s
+                      AND s.skill_id = %s
+                    """,
+                    accepted,
+                )
+                learner_name, provider_name, skill_name = cur.fetchone()
+
+        print(
+            f"\nAccepted request {request_id}: {provider_name} will teach "
+            f"{skill_name} to {learner_name}."
+        )
+    finally:
+        conn.close()
+
+
+def all_demo() -> None:
+    app_demo()
+    cleanup()
+    postgres_demo()
+    heading("Concurrency-safe booking")
+    run(PYTHON, "scripts/concurrency_test.py")
+    match_demo()
+    heading("Redis TTL presence")
+    run(PYTHON, "scripts/redis_presence.py")
+    heading("Neo4j graph projection and queries")
+    run(PYTHON, "scripts/neo4j_sync.py", "--demo-queries")
+
+
+def prepare() -> None:
+    run(
+        "docker",
+        "compose",
+        "up",
+        "-d",
+        "--wait",
+        "postgres",
+        "neo4j",
+        "redis",
+    )
+    from scripts.config import redis_client
+
+    client = redis_client()
+    try:
+        client.ping()
+        print("SkillMesh Redis container is healthy.", flush=True)
+    finally:
+        client.close()
+    run(PYTHON, "scripts/seed_postgres.py")
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the SkillMesh viva without copying long SQL commands."
+    )
+    subparsers = parser.add_subparsers(dest="demo", required=True)
+    commands = {
+        "prepare": "start containers and fill missing embeddings",
+        "cleanup": "remove only data created by the CLI walkthrough",
+        "app": "create a user, skills, vector match, and swap request",
+        "add-user": "add a teaching or learning skill and find matches",
+        "find-match": "find teachers for an existing learner",
+        "create-request": "create a pending request for an exact teacher",
+        "accept-request": "accept a provider's pending incoming request",
+        "postgres": "routines, function calls, procedure calls, and view",
+        "race": "two learners competing for one slot",
+        "match": "vector matching plus the HNSW index",
+        "presence": "Redis heartbeat and TTL cycle",
+        "graph": "Neo4j sync and graph queries",
+        "tests": "the complete integration suite",
+        "all": "the full live demo, including the CLI app journey",
+    }
+    custom_commands = {
+        "add-user",
+        "find-match",
+        "create-request",
+        "accept-request",
+    }
+    for name, help_text in commands.items():
+        if name in custom_commands:
+            continue
+        subparsers.add_parser(name, help=help_text)
+
+    add_user_parser = subparsers.add_parser(
+        "add-user",
+        help=commands["add-user"],
+        description=(
+            "Create or update a user and TEACH/LEARN skill, generate embeddings, "
+            "and rank users on the opposite side. Mentors default to TEACH; "
+            "other roles default to LEARN. Omitted fields are prompted for."
+        ),
+    )
+    add_user_parser.add_argument("--name", help="user's full name")
+    add_user_parser.add_argument("--email", help="unique user email")
+    add_user_parser.add_argument(
+        "--password-hash",
+        help="placeholder hash (this project does not implement authentication)",
+    )
+    add_user_parser.add_argument(
+        "--role", choices=("student", "mentor", "admin"), help="account role"
+    )
+    add_user_parser.add_argument("--department", help="department name")
+    add_user_parser.add_argument(
+        "--year-of-study", type=int, choices=range(1, 7), help="year from 1 to 6"
+    )
+    add_user_parser.add_argument("--bio", help="short user biography")
+    add_user_parser.add_argument(
+        "--skill-type",
+        choices=("LEARN", "TEACH"),
+        help="skill direction (default: TEACH for mentors, otherwise LEARN)",
+    )
+    add_user_parser.add_argument("--skill", help="skill ID or exact skill name")
+    add_user_parser.add_argument(
+        "--proficiency",
+        choices=("beginner", "intermediate", "advanced"),
+        help="current proficiency in the selected skill",
+    )
+    add_user_parser.add_argument(
+        "--description", help="specific teaching offering or learning goal"
+    )
+    add_user_parser.add_argument(
+        "--limit", type=match_limit, default=5, help="matches to show (1-50)"
+    )
+    add_user_parser.add_argument(
+        "--create-request",
+        action="store_true",
+        help="create a pending request for the best exact-skill teacher",
+    )
+
+    find_match_parser = subparsers.add_parser(
+        "find-match",
+        help=commands["find-match"],
+        description=(
+            "Rank teachers for an existing user's LEARN skill without creating "
+            "a request. Omitted identity and skill fields are prompted for."
+        ),
+    )
+    find_match_parser.add_argument(
+        "--user",
+        "--email",
+        dest="user",
+        help="learner user ID, name, or email",
+    )
+    find_match_parser.add_argument("--skill", help="LEARN skill ID or exact name")
+    find_match_parser.add_argument(
+        "--limit", type=match_limit, default=5, help="matches to show (1-50)"
+    )
+
+    create_request_parser = subparsers.add_parser(
+        "create-request",
+        help=commands["create-request"],
+        description=(
+            "Create a pending request from an existing learner to a teacher who "
+            "offers the exact requested skill."
+        ),
+    )
+    create_request_parser.add_argument(
+        "--learner",
+        "--learner-email",
+        dest="learner",
+        help="learner user ID, name, or email",
+    )
+    create_request_parser.add_argument(
+        "--skill", help="learner's LEARN skill ID or exact name"
+    )
+    create_request_parser.add_argument(
+        "--provider", help="teacher user ID or email (defaults to the best match)"
+    )
+
+    accept_request_parser = subparsers.add_parser(
+        "accept-request",
+        help=commands["accept-request"],
+        description=(
+            "List and accept a teacher's pending incoming request. Select the "
+            "teacher by user ID, name, or email."
+        ),
+    )
+    accept_request_parser.add_argument(
+        "--provider",
+        "--provider-email",
+        dest="provider",
+        help="teacher user ID, name, or email",
+    )
+    accept_request_parser.add_argument(
+        "--request-id", type=int, help="pending request ID"
+    )
+    args = parser.parse_args(argv)
+
+    actions = {
+        "prepare": prepare,
+        "cleanup": cleanup,
+        "app": app_demo,
+        "add-user": lambda: add_user(args),
+        "find-match": lambda: find_match(args),
+        "create-request": lambda: create_request(args),
+        "accept-request": lambda: accept_request(args),
+        "postgres": postgres_demo,
+        "race": lambda: run(PYTHON, "scripts/concurrency_test.py"),
+        "match": match_demo,
+        "presence": lambda: run(PYTHON, "scripts/redis_presence.py"),
+        "graph": lambda: run(PYTHON, "scripts/neo4j_sync.py", "--demo-queries"),
+        "tests": lambda: run(PYTHON, "-m", "pytest", "tests/", "-v"),
+        "all": all_demo,
+    }
+    try:
+        actions[args.demo]()
+    except (OSError, subprocess.CalledProcessError, UserInputError) as exc:
+        print(f"Demo failed: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

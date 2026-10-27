@@ -30,7 +30,7 @@ NEO4J_PASS = os.getenv("NEO4J_PASS", "skillmesh123")
 
 # --- Redis ------------------------------------------------------------------
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
 
 # --- Embeddings -------------------------------------------------------------
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")

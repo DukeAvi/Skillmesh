@@ -23,25 +23,16 @@ COLUMNS = [
     ("total_sessions", "Total"),
 ]
 
-RULE = "+-------+---------+----------------------+--------+---------+-------+"
-HEADER = "| Rank  | User ID | Name                 | Taught | Learned | Total |"
-SEPARATOR = "+-------+---------+----------------------+--------+---------+-------+"
-
-
 def render_table(rows):
-    """Render leaderboard rows as a fixed-width ASCII table."""
-    lines = [RULE, HEADER, SEPARATOR]
+    """Render a compact table with one rule below the column headings."""
+    header = f"{'Rank':>4}  {'User':>5}  {'Name':<20}  {'Taught':>6}  {'Learned':>7}  {'Total':>5}"
+    lines = [header, "-" * len(header)]
     for row in rows:
-        cells = [
-            f"{row['rank']:>5}",
-            f"{row['user_id']:>7}",
-            f"{(row['name'] or '-'):<20}",
-            f"{row['sessions_taught']:>6}",
-            f"{row['sessions_learned']:>7}",
-            f"{row['total_sessions']:>5}",
-        ]
-        lines.append("| " + " | ".join(cells) + " |")
-        lines.append(SEPARATOR)
+        lines.append(
+            f"{row['rank']:>4}  {row['user_id']:>5}  "
+            f"{(row['name'] or '-'):<20}  {row['sessions_taught']:>6}  "
+            f"{row['sessions_learned']:>7}  {row['total_sessions']:>5}"
+        )
     return "\n".join(lines)
 
 
@@ -62,18 +53,21 @@ def fetch_leaderboard(limit=None, conn=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--title", default="SkillMesh leaderboard")
     args = parser.parse_args(argv)
 
     rows = fetch_leaderboard(args.limit)
-    print("=" * 57)
-    print("SkillMesh leaderboard (completed sessions)")
-    print("=" * 57)
+    print(f"\n{args.title}")
     print(render_table(rows))
-    print(f"{len(rows)} user(s) ranked.")
 
     top = rows[0] if rows else None
     if top:
-        print(f"\nTop mentor: {top['name']} with {top['total_sessions']} completed session(s).")
+        print(
+            f"\n{len(rows)} users ranked. Top: {top['name']} "
+            f"with {top['total_sessions']} completed sessions."
+        )
+    else:
+        print("\nNo users to rank.")
     return 0
 
 

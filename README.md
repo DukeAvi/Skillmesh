@@ -73,7 +73,7 @@ docker compose down -v && docker compose up -d     # -v destroys the named volum
 | Neo4j Browser | http://localhost:7474 | `neo4j` / `skillmesh123` |
 | Neo4j Bolt | `bolt://localhost:7687` | `neo4j` / `skillmesh123` |
 | PostgreSQL | `localhost:5432` | `skillmesh` / `skillmesh` (db `skillmesh`) |
-| Redis | `localhost:6379` | — |
+| Redis | `localhost:6380` | — |
 
 ```bash
 # psql
@@ -103,35 +103,86 @@ Or without a venv: `pip install -r requirements.txt`.
 
 ---
 
-## 4. Run it, in order
+## 4. Run the demo
 
 ```bash
-# 0. generate the 384-dim embeddings for the seeded user_skills rows
-python scripts/seed_postgres.py
+# Once before the demo
+./demo prepare
+./demo cleanup
 
-# 1. semantic matching: who could TEACH me the skill I want to LEARN?
-python scripts/match.py --learner 1 --skill 5 --limit 10
-python scripts/match.py --learner 1 --skill 5 --create-request   # also persist a swap_request
-
-# 2. PostgreSQL -> Neo4j sync (MERGE, idempotent), then run the demo queries
-python scripts/neo4j_sync.py
-python scripts/neo4j_sync.py --demo-queries
-
-# 3. Redis presence set / exists / ttl / expire cycle  -> prints RESULT: PASS
-python scripts/redis_presence.py
-
-# 4. double-booking race: 2 threads, 1 slot -> prints RESULT: PASS
-python scripts/concurrency_test.py
-
-# 5. the leaderboard view, pretty-printed
-python scripts/leaderboard.py
-
-# 6. the whole test-suite
-pytest tests/ -v
+# Short, presenter-friendly sections
+./demo app
+./demo postgres
+./demo race
+./demo match
+./demo presence
+./demo graph
+./demo tests
 ```
 
-`seed_postgres.py` prints "Nothing to do" on a second run; add `--force` to
-recompute every embedding.
+`./demo app` is a CLI-style product walkthrough: it creates a user, adds a new
+catalogue skill, registers `TEACH` and `LEARN` skills, finds a teacher, and
+creates a pending request. It leaves those rows available for inspection;
+`./demo cleanup` removes only that walkthrough data and preserves the seed.
+
+To manually add your own user and find a match, run the interactive command:
+
+```bash
+./demo add-user
+```
+
+It starts PostgreSQL if necessary, prompts for the user and skill, creates or
+updates both rows, generates all missing embeddings, and prints semantic
+matches. Mentors default to `TEACH` and are matched with learners; other roles
+default to `LEARN` and are matched with teachers. Use `--skill-type` to override
+that default. Add `--create-request` to a `LEARN` entry to persist a pending
+request for the best teacher who offers that exact skill. Every prompt is also
+available as a flag for repeatable use:
+
+```bash
+./demo add-user \
+  --name "Alex Johnson" \
+  --email "alex.johnson@campus.edu" \
+  --password-hash "demo-placeholder-hash" \
+  --role student \
+  --department "Computer Science" \
+  --year-of-study 2 \
+  --bio "Interested in learning guitar." \
+  --skill-type LEARN \
+  --skill Guitar \
+  --proficiency beginner \
+  --description "I want to learn chords, strumming, and fingerpicking."
+```
+
+Continue the manual workflow with separate commands:
+
+```bash
+./demo find-match --user "alex.johnson@campus.edu" --skill Guitar
+./demo create-request --learner "alex.johnson@campus.edu" --skill Guitar
+./demo accept-request --provider "Ananya Iyer"
+```
+
+`create-request` lists exact-skill teachers and defaults to the best one.
+`accept-request` first lists teachers with pending requests, accepts a teacher
+user ID, name, or email, then prompts for the request ID. Without flags, the
+learner commands first list users with `LEARN` skills and use the same selection
+style. Run `./demo <command>
+--help` for its complete option list. The project
+has no authentication layer, so `--password-hash` remains a demo placeholder
+rather than a real password.
+
+Use `./demo all` to rehearse the CLI journey and five database-proof sections
+continuously; it cleans up the journey data before the fixed-seed proofs. See
+[`playbook.md`](playbook.md) for what to say and what each section proves.
+The runner uses `.venv` automatically and starts the project Redis container on
+host port `6380`, avoiding a host Redis that may already use `6379`.
+
+The individual scripts remain available for development and custom arguments.
+For example, this persists a request for the top match:
+
+```bash
+python scripts/match.py --learner 1 --skill 5 --create-request
+```
 
 Optional — book one of the still-open slots yourself:
 
