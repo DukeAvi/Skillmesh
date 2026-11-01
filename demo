@@ -229,6 +229,7 @@ def postgres_demo() -> None:
     show_functions()
     show_procedures()
     run(PYTHON, "scripts/leaderboard.py", "--title", "4. Leaderboard view")
+    run(PYTHON, "scripts/skill_stats.py", "--title", "5. Skill popularity and demand view")
 
 
 def match_demo() -> None:

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SkillMesh / Observatory</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">SKILLMESH // EXCHANGE INTELLIGENCE</p>
+          <h1>Find the <em>missing</em> knowledge.</h1>
+          <p class="lede">A live readout of what the campus can teach, what it wants to learn, and where the gaps are widening.</p>
+        </div>
+        <div class="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
+      </header>
+
+      <section class="signal-grid" aria-label="Summary">
+        <div class="signal signal-hot"><span>OPEN DEMAND</span><strong id="open-demand">—</strong><small>learner registrations</small></div>
+        <div class="signal"><span>TEACHING SUPPLY</span><strong id="teaching-supply">—</strong><small>teacher registrations</small></div>
+        <div class="signal"><span>EXCHANGES COMPLETE</span><strong id="exchanges">—</strong><small>sessions in the ledger</small></div>
+        <div class="signal"><span>VISIBLE SKILLS</span><strong id="skill-count">—</strong><small>catalogue coverage</small></div>
+      </section>
+
+      <section class="observatory">
+        <div class="section-head">
+          <div><p class="eyebrow">01 / DEMAND FIELD</p><h2>Where learners are waiting</h2></div>
+          <button id="refresh" type="button">↻ refresh readout</button>
+        </div>
+        <div class="field-layout">
+          <div id="skill-list" class="skill-list"><div class="loading">scanning the catalogue...</div></div>
+          <aside class="annotation">
+            <p class="eyebrow">READ THE GAP</p>
+            <div class="legend"><i class="legend-bar positive"></i><span>more learners than teachers</span></div>
+            <div class="legend"><i class="legend-bar balanced"></i><span>balanced exchange</span></div>
+            <p class="annotation-copy">The gap is calculated from distinct registrations, not session volume. A positive value is a useful signal for recruiting mentors.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lower-grid">
+        <article class="panel">
+          <p class="eyebrow">02 / EXCHANGE LEAGUE</p><h2>Most active people</h2>
+          <div id="leaderboard" class="table-wrap"><div class="loading">loading ranks...</div></div>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">03 / COMPLETION TRACE</p><h2>What actually moved</h2>
+          <div id="activity" class="activity"><div class="loading">loading sessions...</div></div>
+        </article>
+      </section>
+
+      <footer><span>POSTGRESQL / ANALYTICAL READ MODEL</span><span id="server-time">—</span></footer>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

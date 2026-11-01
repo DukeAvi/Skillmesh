@@ -1,17 +1,19 @@
-# SkillMesh — Database Layer
+# SkillMesh — Database Layer + Observatory
 
-A **database-only** demonstration of four storage paradigms working together:
+A database demonstration of four storage paradigms working together, with a
+small read-only web observatory for exploring the resulting data:
 
 | Store | Paradigm | What it proves |
 |---|---|---|
-| PostgreSQL 16 | relational | normalised schema, transactions, 2 functions, 2 procedures, constraints, indexes, and a CTE + window-function view |
+| PostgreSQL 16 | relational | normalised schema, transactions, 2 functions, 2 procedures, constraints, indexes, and analytical CTE + window-function views |
 | pgvector 0.8 | vector similarity inside PostgreSQL | 384-dim embeddings, cosine distance, HNSW index, semantic skill matching |
 | Neo4j 5 Community | graph | `MERGE`-based sync from PostgreSQL, mentor chains, multi-hop and barter queries |
 | Redis 7 | key-value with TTL | presence heartbeat with `SETEX`, expiry instead of a boolean column |
 
-There is **no web app, no REST API and no frontend**. The deliverables are the
-databases plus scripts that prove they work. The audit, demo commands, speaking
-notes, and viva Q&A are in [`playbook.md`](playbook.md).
+The [`web/`](/home/cow/github/Skillmesh/web) observatory is intentionally not a
+generic admin dashboard. It presents a dark “demand field” command deck:
+learner demand, teaching supply, demand gaps, completed exchanges, and the
+leaderboard are read directly from PostgreSQL analytical views.
 
 ---
 
@@ -58,7 +60,8 @@ docker compose ps          # postgres / neo4j / redis  ->  (healthy)
 The `postgres` service mounts `./sql` at `/docker-entrypoint-initdb.d`, so on the
 **first** start of an empty `pgdata` volume it runs, in order:
 `01_extensions.sql` → `02_schema.sql` → `03_indexes.sql` →
-`04_leaderboard_view.sql` → `04_routines.sql` → `05_seed.sql`.
+`04_leaderboard_view.sql` → `04_routines.sql` →
+`04_skill_popularity_view.sql` → `05_seed.sql`.
 
 To re-run the seed from scratch later:
 
@@ -174,8 +177,28 @@ rather than a real password.
 Use `./demo all` to rehearse the CLI journey and five database-proof sections
 continuously; it cleans up the journey data before the fixed-seed proofs. See
 [`playbook.md`](playbook.md) for what to say and what each section proves.
+
+The PostgreSQL demo includes two analytical views:
+
+* `leaderboard` ranks users by completed sessions taught and learned.
+* `skill_popularity` ranks catalogue skills by learner demand and reports
+  teachers, learners, completed sessions, and the demand gap. It uses
+  `LEFT JOIN` and `COALESCE`, so skills with no registrations remain visible.
 The runner uses `.venv` automatically and starts the project Redis container on
 host port `6380`, avoiding a host Redis that may already use `6379`.
+
+### Open the web observatory
+
+Start the databases, then from the repository root run:
+
+```bash
+python web/app.py
+```
+
+Open <http://localhost:8080>. The server exposes read-only JSON endpoints for
+the frontend (`/api/skills`, `/api/leaderboard`, `/api/activity`, and
+`/api/health`) and serves the static observatory from the same process. Set
+`SKILLMESH_WEB_PORT` to use another port.
 
 The individual scripts remain available for development and custom arguments.
 For example, this persists a request for the top match:
@@ -228,7 +251,10 @@ RESULT: PASS
 
 ```bash
 docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dt'   # 8 tables
-docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dv'   # leaderboard view
+docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dv'   # analytical views
+
+# skill supply and demand
+python scripts/skill_stats.py
 docker compose exec postgres psql -U skillmesh -d skillmesh -c '\dx'   # vector + btree_gist
 
 # exactly 2 functions + 2 procedures
@@ -291,6 +317,7 @@ skillmesh/
 │   ├── 02_schema.sql       # 8 tables + constraints
 │   ├── 03_indexes.sql      # btree indexes + HNSW on user_skills.embedding
 │   ├── 04_leaderboard_view.sql
+│   ├── 04_skill_popularity_view.sql
 │   ├── 04_routines.sql     # exactly 2 functions + 2 procedures
 │   └── 05_seed.sql         # embedding column deliberately left NULL
 ├── cypher/
@@ -305,7 +332,13 @@ skillmesh/
 │   ├── concurrency_test.py # 2 threads, 1 slot, 1 winner
 │   ├── neo4j_sync.py       # PostgreSQL -> Neo4j with MERGE
 │   ├── redis_presence.py   # SETEX heartbeat + TTL cycle
-│   └── leaderboard.py      # pretty-print the view
+│   ├── leaderboard.py      # pretty-print the leaderboard view
+│   └── skill_stats.py       # pretty-print the skill demand view
+├── web/
+│   ├── app.py               # read-only API and static-file server
+│   ├── index.html           # observatory layout
+│   ├── styles.css           # command-deck visual system
+│   └── app.js               # API loading and view rendering
 └── tests/
     ├── test_pgvector.py
     ├── test_concurrency.py
