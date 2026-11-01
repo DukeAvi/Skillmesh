@@ -59,6 +59,21 @@ services:
       retries: 20
       start_period: 5s
 
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: skillmesh-web
+    restart: unless-stopped
+    environment:
+      PG_DSN: postgresql://skillmesh:skillmesh@postgres:5432/skillmesh
+      SKILLMESH_WEB_PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   neo4jdata:

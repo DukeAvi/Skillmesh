@@ -30,7 +30,13 @@
           <button id="refresh" type="button">↻ refresh readout</button>
         </div>
         <div class="field-layout">
-          <div id="skill-list" class="skill-list"><div class="loading">scanning the catalogue...</div></div>
+          <div>
+            <div class="search-line">
+              <input id="skill-search" type="search" placeholder="Search the skill catalogue..." aria-label="Search skills">
+              <select id="learner-select" aria-label="Choose your learner profile"><option>loading profiles...</option></select>
+            </div>
+            <div id="skill-list" class="skill-list"><div class="loading">scanning the catalogue...</div></div>
+          </div>
           <aside class="annotation">
             <p class="eyebrow">READ THE GAP</p>
             <div class="legend"><i class="legend-bar positive"></i><span>more learners than teachers</span></div>
@@ -40,15 +46,32 @@
         </div>
       </section>
 
+      <section id="match-drawer" class="match-drawer" hidden>
+        <div class="section-head">
+          <div><p class="eyebrow">04 / MATCHMAKER</p><h2 id="match-title">Teachers for this skill</h2></div>
+          <button id="close-matches" type="button">close</button>
+        </div>
+        <p id="match-help" class="lede">Choose a teacher below to send a request.</p>
+        <div id="match-list" class="match-list"></div>
+      </section>
+
       <section class="lower-grid">
         <article class="panel">
           <p class="eyebrow">02 / EXCHANGE LEAGUE</p><h2>Most active people</h2>
           <div id="leaderboard" class="table-wrap"><div class="loading">loading ranks...</div></div>
         </article>
         <article class="panel">
-          <p class="eyebrow">03 / COMPLETION TRACE</p><h2>What actually moved</h2>
+          <p class="eyebrow">03 / COMPLETION TRACE</p><h2>Completed exchanges</h2>
           <div id="activity" class="activity"><div class="loading">loading sessions...</div></div>
         </article>
+      </section>
+
+      <section class="requests-panel">
+        <div class="section-head">
+          <div><p class="eyebrow">05 / YOUR EXCHANGE LOG</p><h2>Requests</h2></div>
+          <button id="load-requests" type="button">refresh requests</button>
+        </div>
+        <div id="requests" class="requests"><div class="loading">choose a profile to see requests...</div></div>
       </section>
 
       <footer><span>POSTGRESQL / ANALYTICAL READ MODEL</span><span id="server-time">—</span></footer>

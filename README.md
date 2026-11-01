@@ -189,16 +189,19 @@ host port `6380`, avoiding a host Redis that may already use `6379`.
 
 ### Open the web observatory
 
-Start the databases, then from the repository root run:
+Start the complete stack:
 
 ```bash
-python web/app.py
+docker compose up -d
 ```
 
 Open <http://localhost:8080>. The server exposes read-only JSON endpoints for
-the frontend (`/api/skills`, `/api/leaderboard`, `/api/activity`, and
-`/api/health`) and serves the static observatory from the same process. Set
-`SKILLMESH_WEB_PORT` to use another port.
+the frontend (`/api/skills`, `/api/matches`, `/api/requests`, `/api/leaderboard`,
+`/api/activity`, and `/api/health`) and serves the static observatory from the
+same process. All user actions happen in the browser: search the catalogue,
+choose a learner profile, inspect ranked teachers, send requests, and review
+the exchange log. The standalone fallback remains `python web/app.py` when
+running outside Compose.
 
 The individual scripts remain available for development and custom arguments.
 For example, this persists a request for the top match:
@@ -339,6 +342,8 @@ skillmesh/
 │   ├── index.html           # observatory layout
 │   ├── styles.css           # command-deck visual system
 │   └── app.js               # API loading and view rendering
+├── Dockerfile.web           # lightweight frontend container
+└── requirements-web.txt     # frontend-only Python dependencies
 └── tests/
     ├── test_pgvector.py
     ├── test_concurrency.py
