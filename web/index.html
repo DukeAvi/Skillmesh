@@ -10,12 +10,34 @@
     <main class="shell">
       <header class="masthead">
         <div>
-          <p class="eyebrow">SKILLMESH // EXCHANGE INTELLIGENCE</p>
-          <h1>Find the <em>missing</em> knowledge.</h1>
-          <p class="lede">A live readout of what the campus can teach, what it wants to learn, and where the gaps are widening.</p>
+          <p class="eyebrow">SKILLMESH</p>
+          <h1>Learn something. <em>Teach something.</em></h1>
+          <p class="lede">Find people on campus who can help you learn, and share the skills you know.</p>
         </div>
-        <div class="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
+        <div class="header-actions">
+          <div class="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
+          <button id="profile-button" class="profile-button" type="button" aria-expanded="false">
+            <span id="profile-avatar" class="avatar">?</span>
+            <span><small>Signed in as</small><strong id="profile-name">Choose profile</strong></span>
+            <span class="chevron">⌄</span>
+          </button>
+          <div id="profile-menu" class="profile-menu" hidden>
+            <p class="menu-label">Your profile</p>
+            <p id="profile-email" class="profile-email">Choose a profile to continue</p>
+            <button id="login-button" type="button">Sign in / switch profile</button>
+            <button id="logout-button" class="quiet-button" type="button">Sign out</button>
+          </div>
+        </div>
       </header>
+
+      <section id="login-panel" class="login-panel" hidden>
+        <div>
+          <p class="eyebrow">WELCOME TO SKILLMESH</p>
+          <h2>Choose your profile</h2>
+          <p class="lede">This demo keeps your selected profile in this browser so requests are made as you.</p>
+        </div>
+        <div id="login-options" class="login-options"></div>
+      </section>
 
       <section class="signal-grid" aria-label="Summary">
         <div class="signal signal-hot"><span>OPEN DEMAND</span><strong id="open-demand">—</strong><small>learner registrations</small></div>
@@ -33,7 +55,7 @@
           <div>
             <div class="search-line">
               <input id="skill-search" type="search" placeholder="Search the skill catalogue..." aria-label="Search skills">
-              <select id="learner-select" aria-label="Choose your learner profile"><option>loading profiles...</option></select>
+              <span id="current-profile" class="current-profile">Choose a profile above</span>
             </div>
             <div id="skill-list" class="skill-list"><div class="loading">scanning the catalogue...</div></div>
           </div>

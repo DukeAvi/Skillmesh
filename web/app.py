@@ -72,7 +72,7 @@ def get_payload(path, query_string):
         )
     if path == "/api/users":
         return query(
-            "SELECT user_id, name, role FROM users ORDER BY name"
+            "SELECT user_id, name, email, role, department FROM users ORDER BY name"
         )
     if path == "/api/matches":
         values = parse_qs(query_string)

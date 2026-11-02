@@ -5,6 +5,9 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 }[char]));
 let skills = [];
 let selectedSkill = null;
+let users = [];
+let currentUser = null;
+const PROFILE_KEY = "skillmesh.currentUser";
 
 function renderSkills(rows) {
   const max = Math.max(...rows.map((row) => Math.max(row.learners, row.teachers)), 1);
@@ -39,8 +42,39 @@ function renderActivity(rows) {
 }
 
 function renderLearners(rows) {
-  $("learner-select").innerHTML = rows.map((row) =>
-    `<option value="${row.user_id}">${escapeHtml(row.name)} — ${escapeHtml(row.role)}</option>`).join("");
+  users = rows;
+  const savedId = Number(localStorage.getItem(PROFILE_KEY));
+  currentUser = users.find((user) => user.user_id === savedId) || null;
+  renderProfile();
+  $("login-panel").hidden = Boolean(currentUser);
+  $("login-options").innerHTML = users.map((row) => `
+    <button class="login-option ${currentUser?.user_id === row.user_id ? "selected" : ""}" data-user-id="${row.user_id}" type="button">
+      <span class="avatar">${escapeHtml(row.name.charAt(0))}</span>
+      <span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.role)} · ${escapeHtml(row.department || "Campus")}</small></span>
+    </button>`).join("");
+  document.querySelectorAll(".login-option").forEach((button) => {
+    button.addEventListener("click", () => selectProfile(Number(button.dataset.userId)));
+  });
+}
+
+function renderProfile() {
+  const name = currentUser?.name || "Choose profile";
+  $("profile-avatar").textContent = name.charAt(0).toUpperCase() || "?";
+  $("profile-name").textContent = name;
+  $("profile-email").textContent = currentUser?.email || "Choose a profile to continue";
+  $("current-profile").textContent = currentUser ? `Searching as ${name}` : "Choose a profile above";
+  $("current-profile").classList.toggle("ready", Boolean(currentUser));
+}
+
+function selectProfile(userId) {
+  currentUser = users.find((user) => user.user_id === userId) || null;
+  if (currentUser) localStorage.setItem(PROFILE_KEY, String(currentUser.user_id));
+  renderProfile();
+  renderLearners(users);
+  $("login-panel").hidden = true;
+  $("profile-menu").hidden = true;
+  $("profile-button").setAttribute("aria-expanded", "false");
+  loadRequests();
 }
 
 function renderRequests(rows) {
@@ -48,7 +82,11 @@ function renderRequests(rows) {
     $("requests").innerHTML = '<div class="loading">No requests yet. Search for a skill to start an exchange.</div>';
     return;
   }
-  const learnerId = Number($("learner-select").value);
+  const learnerId = currentUser?.user_id;
+  if (!learnerId) {
+    $("requests").innerHTML = '<div class="loading">Choose a profile above to see your requests.</div>';
+    return;
+  }
   $("requests").innerHTML = rows.map((row) => `
     <div class="request-row">
       <strong>${escapeHtml(row.skill_name)}</strong>
@@ -58,14 +96,14 @@ function renderRequests(rows) {
 }
 
 async function loadRequests() {
-  const userId = $("learner-select").value;
+  const userId = currentUser?.user_id;
   if (!userId) return;
   const rows = await fetch(`/api/requests?user_id=${userId}`).then((response) => response.json());
   renderRequests(rows);
 }
 
 async function openMatches(skillId) {
-  const learnerId = $("learner-select").value;
+  const learnerId = currentUser?.user_id;
   selectedSkill = skills.find((skill) => skill.skill_id === skillId);
   if (!learnerId) return;
   $("match-drawer").hidden = false;
@@ -87,9 +125,9 @@ async function openMatches(skillId) {
 async function createRequest(button) {
   button.disabled = true;
   const response = await fetch("/api/requests", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST",     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      requester_id: Number($("learner-select").value),
+      requester_id: currentUser.user_id,
       provider_id: Number(button.dataset.provider),
       skill_id: selectedSkill.skill_id,
       similarity_score: Number(button.dataset.similarity)
@@ -102,7 +140,7 @@ async function createRequest(button) {
 
 async function load() {
   try {
-    const [health, skillRows, leaderboard, activity, users] = await Promise.all([
+    const [health, skillRows, leaderboard, activity, userRows] = await Promise.all([
       fetch("/api/health").then((response) => response.json()),
       fetch("/api/skills").then((response) => response.json()),
       fetch("/api/leaderboard").then((response) => response.json()),
@@ -110,7 +148,7 @@ async function load() {
       fetch("/api/users").then((response) => response.json())
     ]);
     if (health.error || skillRows.error) throw new Error(health.error || skillRows.error);
-    skills = skillRows; renderLearners(users); renderSkills(skills); renderLeaderboard(leaderboard); renderActivity(activity);
+    skills = skillRows; renderLearners(userRows); renderSkills(skills); renderLeaderboard(leaderboard); renderActivity(activity);
     loadRequests();
     $("status-dot").classList.add("live"); $("status-text").textContent = "postgres live";
     $("server-time").textContent = health.server_time || "connected";
@@ -123,7 +161,23 @@ async function load() {
 $("refresh").addEventListener("click", load);
 $("close-matches").addEventListener("click", () => $("match-drawer").hidden = true);
 $("load-requests").addEventListener("click", loadRequests);
-$("learner-select").addEventListener("change", loadRequests);
+$("profile-button").addEventListener("click", () => {
+  const menu = $("profile-menu");
+  menu.hidden = !menu.hidden;
+  $("profile-button").setAttribute("aria-expanded", String(!menu.hidden));
+});
+$("login-button").addEventListener("click", () => {
+  $("profile-menu").hidden = true;
+  $("login-panel").hidden = false;
+  $("login-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("logout-button").addEventListener("click", () => {
+  currentUser = null;
+  localStorage.removeItem(PROFILE_KEY);
+  renderProfile();
+  $("profile-menu").hidden = true;
+  $("login-panel").hidden = false;
+});
 $("skill-search").addEventListener("input", (event) => {
   const term = event.target.value.toLowerCase();
   renderSkills(skills.filter((skill) => `${skill.skill_name} ${skill.category_name}`.toLowerCase().includes(term)));

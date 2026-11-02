@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: skillmesh
       POSTGRES_DB: skillmesh
     ports:
-      - "5432:5432"
+      # ${POSTGRES_PORT:-5432} avoids colliding with a host-installed PostgreSQL on 5432.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Every *.sql here runs once, alphabetically, on first boot of an empty pgdata.
