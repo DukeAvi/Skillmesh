@@ -77,3 +77,22 @@ input { flex:1; } select { min-width:235px; }
 .loading { color:var(--muted); font-size:12px; padding:20px 0; }
 footer { color:var(--muted); font-size:10px; display:flex; justify-content:space-between; letter-spacing:.08em; }
 @media(max-width:760px){.shell{padding-top:20px}.masthead,.section-head{display:block}.header-actions{align-items:stretch;margin-top:24px}.profile-menu{top:105px;left:0;right:auto}.signal-grid{grid-template-columns:repeat(2,1fr)}.signal:nth-child(2){border-right:0}.field-layout,.lower-grid{grid-template-columns:1fr}.annotation{border-left:0;border-top:1px solid var(--line);padding:25px 0 0}.skill-row{grid-template-columns:25px 1fr 75px}.skill-row .bar,.skill-row .meta:nth-of-type(2){display:none}.lower-grid{gap:45px}.search-line{display:block}.search-line input,.current-profile{width:100%;margin-bottom:8px}.request-row{grid-template-columns:1fr 1fr}.login-panel{display:block}.login-options{grid-template-columns:1fr;min-width:0;margin-top:20px}button{margin-top:20px}}
+
+/* Keep labels and controls legible at normal zoom, including on phones. */
+body { font-size:16px; line-height:1.5; }
+.eyebrow,.status,.profile-button small,.profile-email,.login-option small,
+.signal span,.signal small,.legend,.annotation-copy,.panel-subtitle,footer { font-size:14px; }
+.lede,.profile-button strong,.login-option strong,.skill-row,.table-wrap table,
+.activity-row,.match-card p,.request-row,.loading { font-size:16px; }
+button { font-size:14px; }
+input,select { font-size:16px; min-width:0; }
+.current-profile,.table-wrap th { font-size:14px; }
+.current-profile { white-space:normal; padding-top:10px; padding-bottom:10px; }
+.table-wrap { overflow-x:auto; }
+.table-wrap th,.table-wrap td { padding-right:12px; }
+.login-options { min-width:min(430px, 100%); }
+@media(max-width:760px) {
+  .skill-row { grid-template-columns:25px minmax(0,1fr) auto; gap:10px; }
+  .activity-row span { white-space:normal; }
+  .signal strong { font-size:36px; }
+}

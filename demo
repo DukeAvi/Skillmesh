@@ -557,7 +557,6 @@ def add_user(args) -> None:
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email) DO UPDATE SET
                         name = EXCLUDED.name,
-                        password_hash = EXCLUDED.password_hash,
                         role = EXCLUDED.role,
                         department = EXCLUDED.department,
                         year_of_study = EXCLUDED.year_of_study,

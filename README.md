@@ -1,7 +1,7 @@
 # SkillMesh — Database Layer + Observatory
 
 A database demonstration of four storage paradigms working together, with a
-small read-only web observatory for exploring the resulting data:
+small web app for exploring the resulting data and sending requests:
 
 | Store | Paradigm | What it proves |
 |---|---|---|
@@ -10,7 +10,7 @@ small read-only web observatory for exploring the resulting data:
 | Neo4j 5 Community | graph | `MERGE`-based sync from PostgreSQL, mentor chains, multi-hop and barter queries |
 | Redis 7 | key-value with TTL | presence heartbeat with `SETEX`, expiry instead of a boolean column |
 
-The [`web/`](/home/cow/github/Skillmesh/web) observatory is intentionally not a
+The [`web/`](web/) observatory is intentionally not a
 generic admin dashboard. It presents a dark “demand field” command deck:
 learner demand, teaching supply, demand gaps, completed exchanges, and the
 leaderboard are read directly from PostgreSQL analytical views.
@@ -19,8 +19,8 @@ leaderboard are read directly from PostgreSQL analytical views.
 
 ## 1. Prerequisites
 
-* **WSL2** running **Ubuntu 22.04+**
-* **Docker Engine + Docker Compose v2** inside WSL2 (`docker compose`, not `docker-compose`)
+* Linux, macOS, or Windows with Docker Desktop (WSL2 is optional)
+* **Docker Engine + Docker Compose v2** (`docker compose`)
 * **Python 3.11+**
 * ~2 GB free disk (the `sentence-transformers` dependency pulls in PyTorch; the
   model itself is ~80 MB)
@@ -171,8 +171,7 @@ user ID, name, or email, then prompts for the request ID. Without flags, the
 learner commands first list users with `LEARN` skills and use the same selection
 style. Run `./demo <command>
 --help` for its complete option list. The project
-has no authentication layer, so `--password-hash` remains a demo placeholder
-rather than a real password.
+CLI's `--password-hash` is a placeholder and does not create a web login.
 
 Use `./demo all` to rehearse the CLI journey and five database-proof sections
 continuously; it cleans up the journey data before the fixed-seed proofs. See
@@ -195,13 +194,36 @@ Start the complete stack:
 docker compose up -d
 ```
 
-Open <http://localhost:8080>. The server exposes read-only JSON endpoints for
-the frontend (`/api/skills`, `/api/matches`, `/api/requests`, `/api/leaderboard`,
-`/api/activity`, and `/api/health`) and serves the static observatory from the
-same process. All user actions happen in the browser: search the catalogue,
-choose a learner profile, inspect ranked teachers, send requests, and review
-the exchange log. The standalone fallback remains `python web/app.py` when
-running outside Compose.
+Open <http://localhost:8080>. Create an account with your name, email and a
+password of at least eight characters, then sign in or out using the profile
+menu. Each browser has its own session; requests are associated with the signed-in
+account. Seed users and CLI-created placeholder hashes cannot be used to sign in.
+Sessions expire after 24 hours or when the web server restarts. Existing database
+volumes work without a reset. The standalone fallback is `python web/app.py`
+after installing `requirements-web.txt` and starting PostgreSQL.
+
+### Simulate on a hotspot or LAN
+
+1. Connect the host and teammate's device to the same hotspot or Wi-Fi network.
+   Start the stack on the host with `docker compose up -d --build`.
+2. Find the host's LAN IPv4 address (`hostname -I` on Linux, `ipconfig` on
+   Windows, or Network settings on macOS). Use the address on the shared network.
+3. On the teammate's device open `http://HOST_IP:8080`, replacing `HOST_IP` with
+   that address. Each person can create their own account and sign in separately.
+   The host can use `http://localhost:8080`.
+4. Run `./demo prepare` on the host to generate embeddings for seeded skills,
+   then select a skill and inspect matches. Matching requires the learner to have
+   a matching `LEARN` registration; use `./demo add-user` with the same email to
+   add one to your account. The CLI preserves the existing account's password hash;
+   its password-hash prompt is ignored for an existing user. The web app does not
+   yet provide skill registration.
+
+Allow inbound TCP port 8080 in the host firewall if needed. Some hotspots isolate
+clients, and WSL2 networking may require Windows port forwarding; test connectivity
+from the second device. The database ports are bound to the host loopback address.
+This is a trusted-network demo: HTTP sends passwords and session cookies without
+encryption, so use a private hotspot and unique disposable passwords, not public Wi-Fi
+or real credentials. This server is not intended for public deployment.
 
 The individual scripts remain available for development and custom arguments.
 For example, this persists a request for the top match:
@@ -338,7 +360,7 @@ skillmesh/
 │   ├── leaderboard.py      # pretty-print the leaderboard view
 │   └── skill_stats.py       # pretty-print the skill demand view
 ├── web/
-│   ├── app.py               # read-only API and static-file server
+│   ├── app.py               # API, authentication and static-file server
 │   ├── index.html           # observatory layout
 │   ├── styles.css           # command-deck visual system
 │   └── app.js               # API loading and view rendering

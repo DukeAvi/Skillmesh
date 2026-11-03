@@ -24,7 +24,7 @@
           <div id="profile-menu" class="profile-menu" hidden>
             <p class="menu-label">Your profile</p>
             <p id="profile-email" class="profile-email">Choose a profile to continue</p>
-            <button id="login-button" type="button">Sign in / switch profile</button>
+            <button id="login-button" type="button">Sign in / create account</button>
             <button id="logout-button" class="quiet-button" type="button">Sign out</button>
           </div>
         </div>
@@ -33,10 +33,17 @@
       <section id="login-panel" class="login-panel" hidden>
         <div>
           <p class="eyebrow">WELCOME TO SKILLMESH</p>
-          <h2>Choose your profile</h2>
-          <p class="lede">This demo keeps your selected profile in this browser so requests are made as you.</p>
+          <h2>Sign in or create a profile</h2>
+          <p class="lede">Create an account to use your own profile.</p>
         </div>
-        <div id="login-options" class="login-options"></div>
+        <form id="auth-form" class="login-options">
+          <input id="auth-name" placeholder="Name (for new accounts)" autocomplete="name">
+          <input id="auth-email" type="email" placeholder="Email" autocomplete="email" required>
+          <input id="auth-password" type="password" placeholder="Password (at least 8 characters)" minlength="8" autocomplete="current-password" required>
+          <button type="submit">Sign in</button>
+          <button id="register-button" type="button">Create account</button>
+          <p id="auth-error" role="alert"></p>
+        </form>
       </section>
 
       <section class="signal-grid" aria-label="Summary">

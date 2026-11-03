@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
+import secrets
+import threading
+import time
+from http.cookies import SimpleCookie
 import mimetypes
 import os
 import sys
@@ -17,6 +23,26 @@ from scripts.config import pg_connect
 
 
 ROOT = Path(__file__).parent
+SESSIONS = {}
+SESSION_LOCK = threading.Lock()
+SESSION_TTL = 86400
+
+
+def password_hash(password):
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), 600000)
+    return f'pbkdf2_sha256$600000${salt}${digest.hex()}'
+
+
+def verify_password(password, stored):
+    try:
+        algorithm, rounds, salt, digest = stored.split('$')
+        if algorithm != 'pbkdf2_sha256' or int(rounds) != 600000:
+            return False
+        actual = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), int(rounds))
+        return hmac.compare_digest(actual.hex(), digest)
+    except (ValueError, TypeError):
+        return False
 
 
 def query(sql, params=()):
@@ -130,20 +156,52 @@ def get_payload(path, query_string):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send_json(self, payload, status=200):
+    def send_json(self, payload, status=200, cookie=None):
         body = json.dumps(payload, default=json_value).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header('Set-Cookie', cookie)
         self.end_headers()
         self.wfile.write(body)
+
+    def session(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get('Cookie', ''))
+            token = cookie['session'].value
+        except (KeyError, ValueError):
+            return None
+        with SESSION_LOCK:
+            item = SESSIONS.get(token)
+            if item and item[1] > time.time():
+                return item[0]
+            SESSIONS.pop(token, None)
+        return None
 
     def do_GET(self):  # noqa: N802 - required by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
         path = parsed.path
         if path.startswith("/api/"):
             try:
+                if path == '/api/me':
+                    self.send_json(self.session())
+                    return
+                if path == '/api/users':
+                    self.send_json({'error': 'endpoint not found'}, 404)
+                    return
+                if path in ('/api/requests', '/api/matches'):
+                    user = self.session()
+                    if not user:
+                        self.send_json({'error': 'sign in required'}, 401)
+                        return
+                    values = parse_qs(parsed.query)
+                    values['user_id' if path == '/api/requests' else 'learner_id'] = [str(user['user_id'])]
+                    from urllib.parse import urlencode
+                    self.send_json(get_payload(path, urlencode(values, doseq=True)))
+                    return
                 self.send_json(get_payload(path, parsed.query))
             except KeyError:
                 self.send_json({"error": "endpoint not found"}, 404)
@@ -167,12 +225,54 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):  # noqa: N802 - required by BaseHTTPRequestHandler
-        if urlparse(self.path).path != "/api/requests":
+        path = urlparse(self.path).path
+        if path not in ('/api/requests', '/api/login', '/api/register', '/api/logout'):
             self.send_json({"error": "endpoint not found"}, 404)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > 16384:
+                raise ValueError('invalid request size')
             payload = json.loads(self.rfile.read(length))
+            if path == '/api/logout':
+                cookie = SimpleCookie(self.headers.get('Cookie', ''))
+                with SESSION_LOCK:
+                    if 'session' in cookie:
+                        SESSIONS.pop(cookie['session'].value, None)
+                self.send_json({'ok': True}, cookie='session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+                return
+            if path in ('/api/login', '/api/register'):
+                email = str(payload.get('email', '')).strip().lower()
+                password = str(payload.get('password', ''))
+                if not email or '@' not in email or len(password) < 8 or len(password) > 256:
+                    raise ValueError('Enter an email and a password of 8–256 characters')
+                if path == '/api/register':
+                    name = str(payload.get('name', '')).strip()
+                    if not name or len(name) > 100:
+                        raise ValueError('Enter a name of up to 100 characters')
+                    with pg_connect() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute('INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s) ON CONFLICT (email) DO NOTHING RETURNING user_id, name, email', (name, email, password_hash(password)))
+                            row = cur.fetchone()
+                            if not row:
+                                raise ValueError('An account with that email already exists')
+                else:
+                    rows = query('SELECT user_id, name, email, password_hash FROM users WHERE lower(email) = %s', (email,))
+                    if not rows or not verify_password(password, rows[0]['password_hash']):
+                        self.send_json({'error': 'Invalid email or password'}, 401)
+                        return
+                    row = (rows[0]['user_id'], rows[0]['name'], rows[0]['email'])
+                user = dict(zip(('user_id', 'name', 'email'), row))
+                token = secrets.token_urlsafe(32)
+                with SESSION_LOCK:
+                    SESSIONS[token] = (user, time.time() + SESSION_TTL)
+                self.send_json(user, cookie=f'session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL}')
+                return
+            user = self.session()
+            if not user:
+                self.send_json({'error': 'sign in required'}, 401)
+                return
+            payload['requester_id'] = user['user_id']
             self.send_json(execute_request(payload), 201)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             self.send_json({"error": str(exc)}, 400)

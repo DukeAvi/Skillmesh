@@ -9,7 +9,7 @@ services:
       POSTGRES_DB: skillmesh
     ports:
       # ${POSTGRES_PORT:-5432} avoids colliding with a host-installed PostgreSQL on 5432.
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Every *.sql here runs once, alphabetically, on first boot of an empty pgdata.
@@ -28,8 +28,8 @@ services:
     environment:
       NEO4J_AUTH: neo4j/skillmesh123
     ports:
-      - "7474:7474"   # HTTP - Neo4j Browser
-      - "7687:7687"   # Bolt - used by the Python driver
+      - "127.0.0.1:7474:7474"   # HTTP - Neo4j Browser
+      - "127.0.0.1:7687:7687"   # Bolt - used by the Python driver
     volumes:
       - neo4jdata:/data
     healthcheck:
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     ports:
       # 6380 avoids colliding with a host-installed Redis on its default 6379.
-      - "${REDIS_PORT:-6380}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
     volumes:
       - redisdata:/data
     healthcheck:

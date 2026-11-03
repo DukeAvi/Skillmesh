@@ -5,9 +5,7 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 }[char]));
 let skills = [];
 let selectedSkill = null;
-let users = [];
 let currentUser = null;
-const PROFILE_KEY = "skillmesh.currentUser";
 
 function renderSkills(rows) {
   const max = Math.max(...rows.map((row) => Math.max(row.learners, row.teachers)), 1);
@@ -41,20 +39,10 @@ function renderActivity(rows) {
     <div class="activity-row"><span>${escapeHtml(row.skill_name)}<b>${row.completed_sessions}</b></span><span class="bar"><i style="width:${row.completed_sessions / max * 100}%"></i></span></div>`).join("");
 }
 
-function renderLearners(rows) {
-  users = rows;
-  const savedId = Number(localStorage.getItem(PROFILE_KEY));
-  currentUser = users.find((user) => user.user_id === savedId) || null;
+function renderLearners(user) {
+  currentUser = user;
   renderProfile();
   $("login-panel").hidden = Boolean(currentUser);
-  $("login-options").innerHTML = users.map((row) => `
-    <button class="login-option ${currentUser?.user_id === row.user_id ? "selected" : ""}" data-user-id="${row.user_id}" type="button">
-      <span class="avatar">${escapeHtml(row.name.charAt(0))}</span>
-      <span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.role)} · ${escapeHtml(row.department || "Campus")}</small></span>
-    </button>`).join("");
-  document.querySelectorAll(".login-option").forEach((button) => {
-    button.addEventListener("click", () => selectProfile(Number(button.dataset.userId)));
-  });
 }
 
 function renderProfile() {
@@ -66,16 +54,17 @@ function renderProfile() {
   $("current-profile").classList.toggle("ready", Boolean(currentUser));
 }
 
-function selectProfile(userId) {
-  currentUser = users.find((user) => user.user_id === userId) || null;
-  if (currentUser) localStorage.setItem(PROFILE_KEY, String(currentUser.user_id));
-  renderProfile();
-  renderLearners(users);
-  $("login-panel").hidden = true;
-  $("profile-menu").hidden = true;
-  $("profile-button").setAttribute("aria-expanded", "false");
+async function authenticate(path) {
+  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: $("auth-name").value, email: $("auth-email").value, password: $("auth-password").value})});
+  const result = await response.json();
+  if (!response.ok) { $("auth-error").textContent = result.error; return; }
+  $("auth-error").textContent = "";
+  $("auth-password").value = "";
+  renderLearners(result);
   loadRequests();
 }
+$("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
+$("register-button").addEventListener("click", () => authenticate("/api/register"));
 
 function renderRequests(rows) {
   if (!rows.length) {
@@ -145,7 +134,7 @@ async function load() {
       fetch("/api/skills").then((response) => response.json()),
       fetch("/api/leaderboard").then((response) => response.json()),
       fetch("/api/activity").then((response) => response.json()),
-      fetch("/api/users").then((response) => response.json())
+      fetch("/api/me").then((response) => response.json())
     ]);
     if (health.error || skillRows.error) throw new Error(health.error || skillRows.error);
     skills = skillRows; renderLearners(userRows); renderSkills(skills); renderLeaderboard(leaderboard); renderActivity(activity);
@@ -171,10 +160,11 @@ $("login-button").addEventListener("click", () => {
   $("login-panel").hidden = false;
   $("login-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 });
-$("logout-button").addEventListener("click", () => {
-  currentUser = null;
-  localStorage.removeItem(PROFILE_KEY);
-  renderProfile();
+$("logout-button").addEventListener("click", async () => {
+  await fetch("/api/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+  renderLearners(null);
+  $("requests").innerHTML = '<div class="loading">Sign in to see your requests.</div>';
+  $("match-drawer").hidden = true;
   $("profile-menu").hidden = true;
   $("login-panel").hidden = false;
 });
