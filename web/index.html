@@ -18,24 +18,23 @@
           <div class="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
           <button id="profile-button" class="profile-button" type="button" aria-expanded="false">
             <span id="profile-avatar" class="avatar">?</span>
-            <span><small>Signed in as</small><strong id="profile-name">Choose profile</strong></span>
+            <span><small id="profile-label">Account</small><strong id="profile-name">Sign in / sign up</strong></span>
             <span class="chevron">⌄</span>
           </button>
           <div id="profile-menu" class="profile-menu" hidden>
             <p class="menu-label">Your profile</p>
             <p id="profile-email" class="profile-email">Choose a profile to continue</p>
             <button id="login-button" type="button">Sign in / create account</button>
-            <button id="change-password-button" type="button">Change password</button>
             <button id="logout-button" class="quiet-button" type="button">Sign out</button>
           </div>
         </div>
       </header>
 
-      <section id="login-panel" class="login-panel" hidden>
+      <section id="login-panel" class="login-panel auth-screen">
         <div>
           <p class="eyebrow">WELCOME TO SKILLMESH</p>
-          <h2>Sign in or create a profile</h2>
-          <p class="lede">Create an account to use your own profile.</p>
+          <h2>Build your learning network.</h2>
+          <p class="lede">Sign in to find people who can help you learn, share what you know, and keep every exchange in one place.</p>
           <p class="pw-rules">Password: at least 8 characters, with uppercase, lowercase, and a digit.</p>
         </div>
         <form id="auth-form" class="login-options">
@@ -48,22 +47,7 @@
         </form>
       </section>
 
-      <section id="password-panel" class="login-panel" hidden>
-        <div>
-          <p class="eyebrow">SECURITY</p>
-          <h2>Change your password</h2>
-          <p class="lede">Enter your current password and choose a new one.</p>
-          <p class="pw-rules">New password: at least 8 characters, with uppercase, lowercase, and a digit.</p>
-        </div>
-        <form id="pw-form" class="login-options">
-          <input id="pw-current" type="password" placeholder="Current password" autocomplete="current-password" required>
-          <input id="pw-new" type="password" placeholder="New password" minlength="8" autocomplete="new-password" required>
-          <input id="pw-confirm" type="password" placeholder="Confirm new password" minlength="8" autocomplete="new-password" required>
-          <button type="submit">Change password</button>
-          <p id="pw-error" role="alert"></p>
-        </form>
-      </section>
-
+      <div id="dashboard" hidden>
       <section class="signal-grid" aria-label="Summary">
         <div class="signal signal-hot"><span>OPEN DEMAND</span><strong id="open-demand">—</strong><small>learner registrations</small></div>
         <div class="signal"><span>TEACHING SUPPLY</span><strong id="teaching-supply">—</strong><small>teacher registrations</small></div>
@@ -122,6 +106,7 @@
       </section>
 
       <footer><span>POSTGRESQL / ANALYTICAL READ MODEL</span><span id="server-time">—</span></footer>
+      </div>
     </main>
     <script src="/app.js"></script>
   </body>

@@ -443,7 +443,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/login",
             "/api/register",
             "/api/logout",
-            "/api/change-password",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -544,60 +543,6 @@ class Handler(BaseHTTPRequestHandler):
                     {**user, "csrf_token": csrf},
                     201,
                     cookie=self._session_cookie(token),
-                )
-                return
-
-            # --- Change password (authenticated) -------------------------
-            if path == "/api/change-password":
-                if not self._require_csrf():
-                    return
-                user = self.session()
-                if not user:
-                    self.send_json({"error": "Sign in required"}, 401)
-                    return
-
-                current = str(payload.get("current_password", ""))
-                new_pw = str(payload.get("new_password", ""))
-
-                if not current:
-                    self.send_json(
-                        {"error": "Enter your current password"}, 400
-                    )
-                    return
-
-                pw_error = _validate_password_strength(new_pw)
-                if pw_error:
-                    self.send_json({"error": pw_error}, 400)
-                    return
-
-                rows = query(
-                    "SELECT password_hash FROM users WHERE user_id = %s",
-                    (user["user_id"],),
-                )
-                if not rows or not verify_password(current, rows[0]["password_hash"]):
-                    self.send_json({"error": "Current password is incorrect"}, 401)
-                    return
-
-                with pg_connect() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "UPDATE users SET password_hash = %s WHERE user_id = %s",
-                            (password_hash(new_pw), user["user_id"]),
-                        )
-
-                # Invalidate all sessions for this user (force re-login)
-                with SESSION_LOCK:
-                    to_remove = [
-                        k
-                        for k, v in SESSIONS.items()
-                        if v["user"]["user_id"] == user["user_id"]
-                    ]
-                    for k in to_remove:
-                        del SESSIONS[k]
-
-                self.send_json(
-                    {"ok": True, "message": "Password changed. Please sign in again."},
-                    cookie=self._clear_cookie(),
                 )
                 return
 

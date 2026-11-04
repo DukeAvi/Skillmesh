@@ -57,13 +57,16 @@ function renderLearners(user) {
   csrfToken = user?.csrf_token || null;
   renderProfile();
   $("login-panel").hidden = Boolean(currentUser);
-  $("password-panel").hidden = true;
+  $("dashboard").hidden = !currentUser;
+  $("logout-button").hidden = !currentUser;
+  $("login-button").hidden = Boolean(currentUser);
 }
 
 function renderProfile() {
-  const name = currentUser?.name || "Choose profile";
+  const name = currentUser?.name || "Sign in / sign up";
   $("profile-avatar").textContent = name.charAt(0).toUpperCase() || "?";
   $("profile-name").textContent = name;
+  $("profile-label").textContent = currentUser ? "Signed in as" : "Account";
   $("profile-email").textContent = currentUser?.email || "Choose a profile to continue";
   $("current-profile").textContent = currentUser ? `Searching as ${name}` : "Choose a profile above";
   $("current-profile").classList.toggle("ready", Boolean(currentUser));
@@ -114,38 +117,6 @@ async function authenticate(path) {
 
 $("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
 $("register-button").addEventListener("click", () => authenticate("/api/register"));
-
-// --- Password change -----------------------------------------------------
-
-async function changePassword() {
-  $("pw-error").textContent = "";
-  const currentPw = $("pw-current").value;
-  const newPw = $("pw-new").value;
-  const confirmPw = $("pw-confirm").value;
-
-  if (!currentPw) { $("pw-error").textContent = "Enter your current password"; return; }
-  if (newPw.length < 8) { $("pw-error").textContent = showPasswordRules(); return; }
-  if (newPw !== confirmPw) { $("pw-error").textContent = "New passwords do not match"; return; }
-
-  const response = await api("/api/change-password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
-  });
-  const result = await response.json();
-  if (!response.ok) { $("pw-error").textContent = result.error; return; }
-
-  // Password changed — user is logged out server-side
-  $("pw-current").value = "";
-  $("pw-new").value = "";
-  $("pw-confirm").value = "";
-  $("password-panel").hidden = true;
-  renderLearners(null);
-  $("requests").innerHTML = '<div class="loading">Password changed. Please sign in again.</div>';
-  $("match-drawer").hidden = true;
-  $("profile-menu").hidden = true;
-  $("login-panel").hidden = false;
-}
 
 // --- Requests & matches --------------------------------------------------
 
@@ -253,18 +224,8 @@ $("profile-button").addEventListener("click", () => {
 $("login-button").addEventListener("click", () => {
   $("profile-menu").hidden = true;
   $("login-panel").hidden = false;
-  $("password-panel").hidden = true;
   $("login-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 });
-
-$("change-password-button").addEventListener("click", () => {
-  $("profile-menu").hidden = true;
-  $("password-panel").hidden = false;
-  $("login-panel").hidden = true;
-  $("password-panel").scrollIntoView({ behavior: "smooth", block: "start" });
-});
-
-$("pw-form").addEventListener("submit", (event) => { event.preventDefault(); changePassword(); });
 
 $("logout-button").addEventListener("click", async () => {
   await api("/api/logout", {
@@ -277,7 +238,6 @@ $("logout-button").addEventListener("click", async () => {
   $("match-drawer").hidden = true;
   $("profile-menu").hidden = true;
   $("login-panel").hidden = false;
-  $("password-panel").hidden = true;
 });
 
 $("skill-search").addEventListener("input", (event) => {
