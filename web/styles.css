@@ -29,6 +29,8 @@ h2 { font-size:25px; }
 .quiet-button { color:var(--muted); border-color:var(--line); }
 .login-panel { display:flex; justify-content:space-between; gap:35px; align-items:flex-start; margin:25px 0 10px; padding:24px; background:var(--soft); border:1px solid #cfe0ff; border-radius:12px; }
 .login-panel .lede { margin-top:8px; }
+.pw-rules { color:var(--muted); font-size:12px; line-height:1.6; margin:8px 0 0; }
+#auth-error, #pw-error { color:#dc2626; font-size:13px; min-height:1.3em; margin:4px 0 0; }
 .login-options { display:grid; grid-template-columns:repeat(2,minmax(190px,1fr)); gap:8px; min-width:430px; }
 .login-option { display:flex; gap:10px; align-items:center; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; text-align:left; text-transform:none; }
 .login-option:hover,.login-option.selected { color:var(--ink); background:var(--panel); border-color:var(--acid); }

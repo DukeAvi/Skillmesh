@@ -25,6 +25,7 @@
             <p class="menu-label">Your profile</p>
             <p id="profile-email" class="profile-email">Choose a profile to continue</p>
             <button id="login-button" type="button">Sign in / create account</button>
+            <button id="change-password-button" type="button">Change password</button>
             <button id="logout-button" class="quiet-button" type="button">Sign out</button>
           </div>
         </div>
@@ -35,6 +36,7 @@
           <p class="eyebrow">WELCOME TO SKILLMESH</p>
           <h2>Sign in or create a profile</h2>
           <p class="lede">Create an account to use your own profile.</p>
+          <p class="pw-rules">Password: at least 8 characters, with uppercase, lowercase, and a digit.</p>
         </div>
         <form id="auth-form" class="login-options">
           <input id="auth-name" placeholder="Name (for new accounts)" autocomplete="name">
@@ -43,6 +45,22 @@
           <button type="submit">Sign in</button>
           <button id="register-button" type="button">Create account</button>
           <p id="auth-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="password-panel" class="login-panel" hidden>
+        <div>
+          <p class="eyebrow">SECURITY</p>
+          <h2>Change your password</h2>
+          <p class="lede">Enter your current password and choose a new one.</p>
+          <p class="pw-rules">New password: at least 8 characters, with uppercase, lowercase, and a digit.</p>
+        </div>
+        <form id="pw-form" class="login-options">
+          <input id="pw-current" type="password" placeholder="Current password" autocomplete="current-password" required>
+          <input id="pw-new" type="password" placeholder="New password" minlength="8" autocomplete="new-password" required>
+          <input id="pw-confirm" type="password" placeholder="Confirm new password" minlength="8" autocomplete="new-password" required>
+          <button type="submit">Change password</button>
+          <p id="pw-error" role="alert"></p>
         </form>
       </section>
 

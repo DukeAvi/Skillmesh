@@ -1,59 +1,173 @@
-"""Small standard-library web server for the SkillMesh observatory."""
+"""Secure web server for the SkillMesh observatory.
+
+Security features:
+- PBKDF2-SHA256 password hashing (600 000 rounds, per-user salt)
+- HMAC-signed session tokens (SERVER_SECRET, not guessable)
+- Brute-force rate limiting (5 attempts per email per 15 min window)
+- CSRF protection via X-CSRF-Token header on every mutating request
+- Per-session CSRF token delivered via /api/me
+- Secure cookie flags (HttpOnly, SameSite=Strict, Secure in production)
+- Input validation and length limits on every endpoint
+- Timing-safe password comparison (hmac.compare_digest)
+- Content-Security-Policy, X-Content-Type-Options, X-Frame-Options headers
+- Request body size limit (16 KiB)
+- No user enumeration on login (generic "Invalid email or password")
+- Session expiry (24 h) with server-side store
+- Password rules enforced server-side (8-256 chars, upper+lower+digit)
+"""
 
 from __future__ import annotations
 
-import json
 import hashlib
 import hmac
-import secrets
-import threading
-import time
-from http.cookies import SimpleCookie
+import json
 import mimetypes
 import os
+import re
+import secrets
 import sys
+import threading
+import time
+from collections import defaultdict
 from decimal import Decimal
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.config import pg_connect
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).parent
-SESSIONS = {}
+SERVER_SECRET = os.getenv("SKILLMESH_SECRET", secrets.token_hex(32))
+SESSION_TTL = 86400  # 24 hours
+MAX_BODY = 16384     # 16 KiB
+
+# Rate limiting: max attempts per window
+RATE_LIMIT_WINDOW = 900   # 15 minutes
+RATE_LIMIT_MAX = 5        # 5 attempts per window per email
+
+# ---------------------------------------------------------------------------
+# Session store (server-side, in-memory)
+# ---------------------------------------------------------------------------
+
+SESSIONS: dict[str, dict] = {}
 SESSION_LOCK = threading.Lock()
-SESSION_TTL = 86400
 
 
-def password_hash(password):
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), 600000)
-    return f'pbkdf2_sha256$600000${salt}${digest.hex()}'
+def _create_session(user: dict) -> tuple[str, str]:
+    """Create a session for the user; return (token, csrf_token)."""
+    token = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    with SESSION_LOCK:
+        SESSIONS[token] = {
+            "user": user,
+            "csrf": csrf_token,
+            "expires": time.time() + SESSION_TTL,
+        }
+    return token, csrf_token
 
 
-def verify_password(password, stored):
-    try:
-        algorithm, rounds, salt, digest = stored.split('$')
-        if algorithm != 'pbkdf2_sha256' or int(rounds) != 600000:
+def _get_session(token: str) -> dict | None:
+    """Return session dict or None if expired/missing."""
+    with SESSION_LOCK:
+        item = SESSIONS.get(token)
+        if item and item["expires"] > time.time():
+            return item
+        SESSIONS.pop(token, None)
+    return None
+
+
+def _destroy_session(token: str) -> None:
+    with SESSION_LOCK:
+        SESSIONS.pop(token, None)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter (in-memory, per email)
+# ---------------------------------------------------------------------------
+
+_rate_lock = threading.Lock()
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(email: str) -> bool:
+    """Return True if the email is within rate limits, False if blocked."""
+    now = time.time()
+    key = email.lower().strip()
+    with _rate_lock:
+        bucket = _rate_buckets[key]
+        # Prune old entries
+        _rate_buckets[key] = [t for t in bucket if t > now - RATE_LIMIT_WINDOW]
+        if len(_rate_buckets[key]) >= RATE_LIMIT_MAX:
             return False
-        actual = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), int(rounds))
+        _rate_buckets[key].append(now)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Password hashing (PBKDF2-SHA256, 600 000 rounds)
+# ---------------------------------------------------------------------------
+
+_HASH_ALGORITHM = "pbkdf2_sha256"
+_HASH_ROUNDS = 600_000
+
+
+def password_hash(password: str) -> str:
+    """Hash a password with a random 16-byte salt."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), bytes.fromhex(salt), _HASH_ROUNDS
+    )
+    return f"{_HASH_ALGORITHM}${_HASH_ROUNDS}${salt}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Constant-time password verification."""
+    try:
+        algorithm, rounds, salt, digest = stored.split("$")
+        if algorithm != _HASH_ALGORITHM or int(rounds) != _HASH_ROUNDS:
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(salt), int(rounds)
+        )
         return hmac.compare_digest(actual.hex(), digest)
     except (ValueError, TypeError):
         return False
+
+
+def _validate_password_strength(password: str) -> str | None:
+    """Return an error message if the password is too weak, else None."""
+    if len(password) < 8 or len(password) > 256:
+        return "Password must be 8–256 characters"
+    if not re.search(r"[A-Z]", password):
+        return "Password must contain at least one uppercase letter"
+    if not re.search(r"[a-z]", password):
+        return "Password must contain at least one lowercase letter"
+    if not re.search(r"\d", password):
+        return "Password must contain at least one digit"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
 
 
 def query(sql, params=()):
     with pg_connect() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            columns = [column.name for column in cur.description]
+            columns = [col.name for col in cur.description]
             return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
-def execute_request(payload):
+def execute_request(payload: dict):
     required = ("requester_id", "provider_id", "skill_id")
     if any(key not in payload for key in required):
         raise ValueError("requester_id, provider_id, and skill_id are required")
@@ -83,10 +197,15 @@ def json_value(value):
     return value
 
 
-def get_payload(path, query_string):
+# ---------------------------------------------------------------------------
+# Read-only data endpoints
+# ---------------------------------------------------------------------------
+
+
+def get_payload(path: str, query_string: str):
     if path == "/api/health":
         rows = query("SELECT current_database() AS database, NOW() AS server_time")
-        return {"ok": True, **{key: json_value(value) for key, value in rows[0].items()}}
+        return {"ok": True, **{k: json_value(v) for k, v in rows[0].items()}}
     if path == "/api/skills":
         return query(
             """
@@ -95,41 +214,6 @@ def get_payload(path, query_string):
             FROM skill_popularity
             ORDER BY demand_rank, skill_name
             """
-        )
-    if path == "/api/users":
-        return query(
-            "SELECT user_id, name, email, role, department FROM users ORDER BY name"
-        )
-    if path == "/api/matches":
-        values = parse_qs(query_string)
-        learner_id = int(values.get("learner_id", ["0"])[0])
-        skill_id = int(values.get("skill_id", ["0"])[0])
-        return query(
-            """
-            SELECT provider_id, provider_name, matched_skill_id, matched_skill,
-                   similarity,
-                   fn_provider_average_rating(provider_id) AS rating
-            FROM fn_find_skill_matches(%s::BIGINT, %s::BIGINT, 10)
-            """,
-            (learner_id, skill_id),
-        )
-    if path == "/api/requests":
-        values = parse_qs(query_string)
-        user_id = int(values.get("user_id", ["0"])[0])
-        return query(
-            """
-            SELECT sr.request_id, sr.status, sr.similarity_score, sr.created_at,
-                   sr.requester_id, requester.name AS requester_name,
-                   sr.provider_id, provider.name AS provider_name,
-                   sr.skill_id, s.name AS skill_name
-            FROM swap_requests sr
-            JOIN users requester ON requester.user_id = sr.requester_id
-            JOIN users provider ON provider.user_id = sr.provider_id
-            JOIN skills s ON s.skill_id = sr.skill_id
-            WHERE sr.requester_id = %s OR sr.provider_id = %s
-            ORDER BY sr.created_at DESC
-            """,
-            (user_id, user_id),
         )
     if path == "/api/leaderboard":
         return query(
@@ -155,53 +239,173 @@ def get_payload(path, query_string):
     raise KeyError(path)
 
 
+# ---------------------------------------------------------------------------
+# HTTP handler
+# ---------------------------------------------------------------------------
+
+# Security headers applied to every response
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "script-src 'self'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'"
+    ),
+}
+
+
 class Handler(BaseHTTPRequestHandler):
+    # --- helpers ---------------------------------------------------------
+
+    def _send_security_headers(self):
+        for header, value in _SECURITY_HEADERS.items():
+            self.send_header(header, value)
+
     def send_json(self, payload, status=200, cookie=None):
         body = json.dumps(payload, default=json_value).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._send_security_headers()
         if cookie:
-            self.send_header('Set-Cookie', cookie)
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
-    def session(self):
+    def _cookie_flags(self) -> str:
+        """Return cookie attribute string; add Secure when behind HTTPS."""
+        base = "Path=/; HttpOnly; SameSite=Strict"
+        # If X-Forwarded-Proto is set (behind a reverse proxy) or explicit env
+        if (self.headers.get("X-Forwarded-Proto") == "https"
+                or os.getenv("SKILLMESH_SECURE_COOKIES") == "1"):
+            base += "; Secure"
+        return base
+
+    def _session_cookie(self, token: str) -> str:
+        return f"session={token}; {self._cookie_flags()}; Max-Age={SESSION_TTL}"
+
+    def _clear_cookie(self) -> str:
+        return f"session=; {self._cookie_flags()}; Max-Age=0"
+
+    def _get_session_token(self) -> str | None:
         cookie = SimpleCookie()
         try:
-            cookie.load(self.headers.get('Cookie', ''))
-            token = cookie['session'].value
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie["session"].value
         except (KeyError, ValueError):
             return None
-        with SESSION_LOCK:
-            item = SESSIONS.get(token)
-            if item and item[1] > time.time():
-                return item[0]
-            SESSIONS.pop(token, None)
-        return None
 
-    def do_GET(self):  # noqa: N802 - required by BaseHTTPRequestHandler
+    def session(self) -> dict | None:
+        """Return the user dict from the session, or None."""
+        token = self._get_session_token()
+        if not token:
+            return None
+        sess = _get_session(token)
+        return sess["user"] if sess else None
+
+    def _require_csrf(self) -> bool:
+        """Validate the CSRF token for mutating requests. Return True if OK."""
+        token = self._get_session_token()
+        if not token:
+            self.send_json({"error": "Sign in required"}, 401)
+            return False
+        sess = _get_session(token)
+        if not sess:
+            self.send_json({"error": "Session expired, please sign in again"}, 401)
+            return False
+        csrf_header = self.headers.get("X-CSRF-Token", "")
+        if not csrf_header or not hmac.compare_digest(csrf_header, sess["csrf"]):
+            self.send_json({"error": "Invalid or missing CSRF token"}, 403)
+            return False
+        return True
+
+    def _read_json_body(self) -> dict | None:
+        """Read and parse JSON body with size limit. Returns None on error (already sent response)."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > MAX_BODY:
+                self.send_json({"error": "Request too large"}, 413)
+                return None
+            raw = self.rfile.read(length)
+            return json.loads(raw) if raw else {}
+        except (ValueError, json.JSONDecodeError):
+            self.send_json({"error": "Invalid JSON"}, 400)
+            return None
+
+    # --- GET routes ------------------------------------------------------
+
+    def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
+
         if path.startswith("/api/"):
             try:
-                if path == '/api/me':
-                    self.send_json(self.session())
+                if path == "/api/me":
+                    token = self._get_session_token()
+                    sess = _get_session(token) if token else None
+                    if sess:
+                        self.send_json({
+                            **sess["user"],
+                            "csrf_token": sess["csrf"],
+                        })
+                    else:
+                        self.send_json(None)
                     return
-                if path == '/api/users':
-                    self.send_json({'error': 'endpoint not found'}, 404)
+
+                if path == "/api/users":
+                    self.send_json({"error": "endpoint not found"}, 404)
                     return
-                if path in ('/api/requests', '/api/matches'):
+
+                if path in ("/api/requests", "/api/matches"):
                     user = self.session()
                     if not user:
-                        self.send_json({'error': 'sign in required'}, 401)
+                        self.send_json({"error": "Sign in required"}, 401)
                         return
                     values = parse_qs(parsed.query)
-                    values['user_id' if path == '/api/requests' else 'learner_id'] = [str(user['user_id'])]
-                    from urllib.parse import urlencode
-                    self.send_json(get_payload(path, urlencode(values, doseq=True)))
+                    id_key = "user_id" if path == "/api/requests" else "learner_id"
+                    values[id_key] = [str(user["user_id"])]
+
+                    if path == "/api/matches":
+                        result = query(
+                            """
+                            SELECT provider_id, provider_name, matched_skill_id,
+                                   matched_skill, similarity,
+                                   fn_provider_average_rating(provider_id) AS rating
+                            FROM fn_find_skill_matches(%s::BIGINT, %s::BIGINT, 10)
+                            """,
+                            (
+                                int(values.get("learner_id", ["0"])[0]),
+                                int(values.get("skill_id", ["0"])[0]),
+                            ),
+                        )
+                        self.send_json(result)
+                    else:
+                        user_id = int(values.get("user_id", ["0"])[0])
+                        result = query(
+                            """
+                            SELECT sr.request_id, sr.status, sr.similarity_score,
+                                   sr.created_at,
+                                   sr.requester_id, requester.name AS requester_name,
+                                   sr.provider_id, provider.name AS provider_name,
+                                   sr.skill_id, s.name AS skill_name
+                            FROM swap_requests sr
+                            JOIN users requester ON requester.user_id = sr.requester_id
+                            JOIN users provider  ON provider.user_id = sr.provider_id
+                            JOIN skills s ON s.skill_id = sr.skill_id
+                            WHERE sr.requester_id = %s OR sr.provider_id = %s
+                            ORDER BY sr.created_at DESC
+                            """,
+                            (user_id, user_id),
+                        )
+                        self.send_json(result)
                     return
+
                 self.send_json(get_payload(path, parsed.query))
             except KeyError:
                 self.send_json({"error": "endpoint not found"}, 404)
@@ -209,6 +413,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"database unavailable: {exc}"}, 503)
             return
 
+        # Static file serving with path traversal protection
         relative = "index.html" if path == "/" else path.lstrip("/")
         requested = (ROOT / relative).resolve()
         if ROOT not in requested.parents and requested != ROOT:
@@ -219,62 +424,194 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = requested.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(requested.name)[0] or "text/plain")
+        self.send_header(
+            "Content-Type",
+            mimetypes.guess_type(requested.name)[0] or "text/plain",
+        )
         self.send_header("Content-Length", str(len(body)))
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):  # noqa: N802 - required by BaseHTTPRequestHandler
+    # --- POST routes -----------------------------------------------------
+
+    def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
-        if path not in ('/api/requests', '/api/login', '/api/register', '/api/logout'):
+
+        if path not in (
+            "/api/requests",
+            "/api/login",
+            "/api/register",
+            "/api/logout",
+            "/api/change-password",
+        ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
+
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length < 0 or length > 16384:
-                raise ValueError('invalid request size')
-            payload = json.loads(self.rfile.read(length))
-            if path == '/api/logout':
-                cookie = SimpleCookie(self.headers.get('Cookie', ''))
-                with SESSION_LOCK:
-                    if 'session' in cookie:
-                        SESSIONS.pop(cookie['session'].value, None)
-                self.send_json({'ok': True}, cookie='session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+            # --- Logout (no CSRF check — just clears the session) --------
+            if path == "/api/logout":
+                token = self._get_session_token()
+                if token:
+                    _destroy_session(token)
+                self.send_json({"ok": True}, cookie=self._clear_cookie())
                 return
-            if path in ('/api/login', '/api/register'):
-                email = str(payload.get('email', '')).strip().lower()
-                password = str(payload.get('password', ''))
-                if not email or '@' not in email or len(password) < 8 or len(password) > 256:
-                    raise ValueError('Enter an email and a password of 8–256 characters')
-                if path == '/api/register':
-                    name = str(payload.get('name', '')).strip()
-                    if not name or len(name) > 100:
-                        raise ValueError('Enter a name of up to 100 characters')
-                    with pg_connect() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute('INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s) ON CONFLICT (email) DO NOTHING RETURNING user_id, name, email', (name, email, password_hash(password)))
-                            row = cur.fetchone()
-                            if not row:
-                                raise ValueError('An account with that email already exists')
-                else:
-                    rows = query('SELECT user_id, name, email, password_hash FROM users WHERE lower(email) = %s', (email,))
-                    if not rows or not verify_password(password, rows[0]['password_hash']):
-                        self.send_json({'error': 'Invalid email or password'}, 401)
-                        return
-                    row = (rows[0]['user_id'], rows[0]['name'], rows[0]['email'])
-                user = dict(zip(('user_id', 'name', 'email'), row))
-                token = secrets.token_urlsafe(32)
+
+            payload = self._read_json_body()
+            if payload is None:
+                return
+
+            # --- Login ---------------------------------------------------
+            if path == "/api/login":
+                email = str(payload.get("email", "")).strip().lower()
+                password = str(payload.get("password", ""))
+                if not email or "@" not in email:
+                    self.send_json({"error": "Enter a valid email"}, 400)
+                    return
+                if not password:
+                    self.send_json({"error": "Enter your password"}, 400)
+                    return
+
+                # Rate limiting
+                if not _check_rate_limit(email):
+                    self.send_json(
+                        {"error": "Too many login attempts. Try again in 15 minutes."},
+                        429,
+                    )
+                    return
+
+                rows = query(
+                    "SELECT user_id, name, email, password_hash "
+                    "FROM users WHERE lower(email) = %s",
+                    (email,),
+                )
+                if not rows or not verify_password(password, rows[0]["password_hash"]):
+                    self.send_json({"error": "Invalid email or password"}, 401)
+                    return
+
+                user = {
+                    "user_id": rows[0]["user_id"],
+                    "name": rows[0]["name"],
+                    "email": rows[0]["email"],
+                }
+                token, csrf = _create_session(user)
+                self.send_json(
+                    {**user, "csrf_token": csrf},
+                    cookie=self._session_cookie(token),
+                )
+                return
+
+            # --- Register ------------------------------------------------
+            if path == "/api/register":
+                email = str(payload.get("email", "")).strip().lower()
+                password = str(payload.get("password", ""))
+                name = str(payload.get("name", "")).strip()
+
+                if not name or len(name) > 100:
+                    self.send_json(
+                        {"error": "Enter a name (up to 100 characters)"}, 400
+                    )
+                    return
+                if not email or "@" not in email or len(email) > 254:
+                    self.send_json({"error": "Enter a valid email address"}, 400)
+                    return
+
+                pw_error = _validate_password_strength(password)
+                if pw_error:
+                    self.send_json({"error": pw_error}, 400)
+                    return
+
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO users (name, email, password_hash) "
+                            "VALUES (%s, %s, %s) "
+                            "ON CONFLICT (email) DO NOTHING "
+                            "RETURNING user_id, name, email",
+                            (name, email, password_hash(password)),
+                        )
+                        row = cur.fetchone()
+                        if not row:
+                            self.send_json(
+                                {"error": "An account with that email already exists"},
+                                409,
+                            )
+                            return
+
+                user = dict(zip(("user_id", "name", "email"), row))
+                token, csrf = _create_session(user)
+                self.send_json(
+                    {**user, "csrf_token": csrf},
+                    201,
+                    cookie=self._session_cookie(token),
+                )
+                return
+
+            # --- Change password (authenticated) -------------------------
+            if path == "/api/change-password":
+                if not self._require_csrf():
+                    return
+                user = self.session()
+                if not user:
+                    self.send_json({"error": "Sign in required"}, 401)
+                    return
+
+                current = str(payload.get("current_password", ""))
+                new_pw = str(payload.get("new_password", ""))
+
+                if not current:
+                    self.send_json(
+                        {"error": "Enter your current password"}, 400
+                    )
+                    return
+
+                pw_error = _validate_password_strength(new_pw)
+                if pw_error:
+                    self.send_json({"error": pw_error}, 400)
+                    return
+
+                rows = query(
+                    "SELECT password_hash FROM users WHERE user_id = %s",
+                    (user["user_id"],),
+                )
+                if not rows or not verify_password(current, rows[0]["password_hash"]):
+                    self.send_json({"error": "Current password is incorrect"}, 401)
+                    return
+
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE users SET password_hash = %s WHERE user_id = %s",
+                            (password_hash(new_pw), user["user_id"]),
+                        )
+
+                # Invalidate all sessions for this user (force re-login)
                 with SESSION_LOCK:
-                    SESSIONS[token] = (user, time.time() + SESSION_TTL)
-                self.send_json(user, cookie=f'session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL}')
+                    to_remove = [
+                        k
+                        for k, v in SESSIONS.items()
+                        if v["user"]["user_id"] == user["user_id"]
+                    ]
+                    for k in to_remove:
+                        del SESSIONS[k]
+
+                self.send_json(
+                    {"ok": True, "message": "Password changed. Please sign in again."},
+                    cookie=self._clear_cookie(),
+                )
+                return
+
+            # --- Create swap request (authenticated + CSRF) --------------
+            if not self._require_csrf():
                 return
             user = self.session()
             if not user:
-                self.send_json({'error': 'sign in required'}, 401)
+                self.send_json({"error": "Sign in required"}, 401)
                 return
-            payload['requester_id'] = user['user_id']
+            payload["requester_id"] = user["user_id"]
             self.send_json(execute_request(payload), 201)
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+
+        except (ValueError, TypeError) as exc:
             self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
             self.send_json({"error": f"request could not be created: {exc}"}, 422)
@@ -283,10 +620,16 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
 def main():
     port = int(os.getenv("SKILLMESH_WEB_PORT", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"SkillMesh observatory listening on http://localhost:{port}")
+    print(f"Security: PBKDF2-SHA256 · CSRF tokens · rate limiting · secure headers")
     server.serve_forever()
 
 

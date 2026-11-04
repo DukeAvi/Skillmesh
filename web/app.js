@@ -6,6 +6,19 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 let skills = [];
 let selectedSkill = null;
 let currentUser = null;
+let csrfToken = null;
+
+// --- Fetch wrapper that attaches CSRF token to mutating requests ---------
+
+async function api(path, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  if (method !== "GET" && csrfToken) {
+    options.headers = { ...options.headers, "X-CSRF-Token": csrfToken };
+  }
+  return fetch(path, options);
+}
+
+// --- Rendering -----------------------------------------------------------
 
 function renderSkills(rows) {
   const max = Math.max(...rows.map((row) => Math.max(row.learners, row.teachers)), 1);
@@ -41,8 +54,10 @@ function renderActivity(rows) {
 
 function renderLearners(user) {
   currentUser = user;
+  csrfToken = user?.csrf_token || null;
   renderProfile();
   $("login-panel").hidden = Boolean(currentUser);
+  $("password-panel").hidden = true;
 }
 
 function renderProfile() {
@@ -54,17 +69,85 @@ function renderProfile() {
   $("current-profile").classList.toggle("ready", Boolean(currentUser));
 }
 
+// --- Auth ----------------------------------------------------------------
+
+function showPasswordRules() {
+  return "At least 8 characters, with uppercase, lowercase, and a digit";
+}
+
 async function authenticate(path) {
-  const response = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: $("auth-name").value, email: $("auth-email").value, password: $("auth-password").value})});
+  $("auth-error").textContent = "";
+  const emailVal = $("auth-email").value.trim();
+  const passwordVal = $("auth-password").value;
+
+  if (!emailVal || !emailVal.includes("@")) {
+    $("auth-error").textContent = "Enter a valid email address";
+    return;
+  }
+  if (passwordVal.length < 8) {
+    $("auth-error").textContent = showPasswordRules();
+    return;
+  }
+
+  const body = { email: emailVal, password: passwordVal };
+  if (path === "/api/register") {
+    const nameVal = $("auth-name").value.trim();
+    if (!nameVal) { $("auth-error").textContent = "Enter your name"; return; }
+    body.name = nameVal;
+  }
+
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   const result = await response.json();
-  if (!response.ok) { $("auth-error").textContent = result.error; return; }
+  if (!response.ok) {
+    $("auth-error").textContent = result.error;
+    return;
+  }
   $("auth-error").textContent = "";
   $("auth-password").value = "";
   renderLearners(result);
   loadRequests();
 }
+
 $("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
 $("register-button").addEventListener("click", () => authenticate("/api/register"));
+
+// --- Password change -----------------------------------------------------
+
+async function changePassword() {
+  $("pw-error").textContent = "";
+  const currentPw = $("pw-current").value;
+  const newPw = $("pw-new").value;
+  const confirmPw = $("pw-confirm").value;
+
+  if (!currentPw) { $("pw-error").textContent = "Enter your current password"; return; }
+  if (newPw.length < 8) { $("pw-error").textContent = showPasswordRules(); return; }
+  if (newPw !== confirmPw) { $("pw-error").textContent = "New passwords do not match"; return; }
+
+  const response = await api("/api/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+  });
+  const result = await response.json();
+  if (!response.ok) { $("pw-error").textContent = result.error; return; }
+
+  // Password changed — user is logged out server-side
+  $("pw-current").value = "";
+  $("pw-new").value = "";
+  $("pw-confirm").value = "";
+  $("password-panel").hidden = true;
+  renderLearners(null);
+  $("requests").innerHTML = '<div class="loading">Password changed. Please sign in again.</div>';
+  $("match-drawer").hidden = true;
+  $("profile-menu").hidden = true;
+  $("login-panel").hidden = false;
+}
+
+// --- Requests & matches --------------------------------------------------
 
 function renderRequests(rows) {
   if (!rows.length) {
@@ -87,7 +170,7 @@ function renderRequests(rows) {
 async function loadRequests() {
   const userId = currentUser?.user_id;
   if (!userId) return;
-  const rows = await fetch(`/api/requests?user_id=${userId}`).then((response) => response.json());
+  const rows = await fetch(`/api/requests?user_id=${userId}`).then((r) => r.json());
   renderRequests(rows);
 }
 
@@ -99,7 +182,7 @@ async function openMatches(skillId) {
   $("match-title").textContent = `Teachers for ${selectedSkill.skill_name}`;
   $("match-list").innerHTML = '<div class="loading">finding semantic matches...</div>';
   $("match-drawer").scrollIntoView({ behavior: "smooth" });
-  const rows = await fetch(`/api/matches?learner_id=${learnerId}&skill_id=${skillId}`).then((response) => response.json());
+  const rows = await fetch(`/api/matches?learner_id=${learnerId}&skill_id=${skillId}`).then((r) => r.json());
   $("match-list").innerHTML = rows.length ? rows.map((row) => `
     <article class="match-card">
       <h3>${escapeHtml(row.provider_name)}</h3>
@@ -113,8 +196,9 @@ async function openMatches(skillId) {
 
 async function createRequest(button) {
   button.disabled = true;
-  const response = await fetch("/api/requests", {
-    method: "POST",     headers: { "Content-Type": "application/json" },
+  const response = await api("/api/requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       requester_id: currentUser.user_id,
       provider_id: Number(button.dataset.provider),
@@ -127,19 +211,26 @@ async function createRequest(button) {
   if (response.ok) loadRequests();
 }
 
+// --- Initial load --------------------------------------------------------
+
 async function load() {
   try {
     const [health, skillRows, leaderboard, activity, userRows] = await Promise.all([
-      fetch("/api/health").then((response) => response.json()),
-      fetch("/api/skills").then((response) => response.json()),
-      fetch("/api/leaderboard").then((response) => response.json()),
-      fetch("/api/activity").then((response) => response.json()),
-      fetch("/api/me").then((response) => response.json())
+      fetch("/api/health").then((r) => r.json()),
+      fetch("/api/skills").then((r) => r.json()),
+      fetch("/api/leaderboard").then((r) => r.json()),
+      fetch("/api/activity").then((r) => r.json()),
+      fetch("/api/me").then((r) => r.json())
     ]);
     if (health.error || skillRows.error) throw new Error(health.error || skillRows.error);
-    skills = skillRows; renderLearners(userRows); renderSkills(skills); renderLeaderboard(leaderboard); renderActivity(activity);
+    skills = skillRows;
+    renderLearners(userRows);
+    renderSkills(skills);
+    renderLeaderboard(leaderboard);
+    renderActivity(activity);
     loadRequests();
-    $("status-dot").classList.add("live"); $("status-text").textContent = "postgres live";
+    $("status-dot").classList.add("live");
+    $("status-text").textContent = "postgres live";
     $("server-time").textContent = health.server_time || "connected";
   } catch (error) {
     $("status-text").textContent = "database offline";
@@ -147,29 +238,51 @@ async function load() {
   }
 }
 
+// --- Event listeners -----------------------------------------------------
+
 $("refresh").addEventListener("click", load);
 $("close-matches").addEventListener("click", () => $("match-drawer").hidden = true);
 $("load-requests").addEventListener("click", loadRequests);
+
 $("profile-button").addEventListener("click", () => {
   const menu = $("profile-menu");
   menu.hidden = !menu.hidden;
   $("profile-button").setAttribute("aria-expanded", String(!menu.hidden));
 });
+
 $("login-button").addEventListener("click", () => {
   $("profile-menu").hidden = true;
   $("login-panel").hidden = false;
+  $("password-panel").hidden = true;
   $("login-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 });
+
+$("change-password-button").addEventListener("click", () => {
+  $("profile-menu").hidden = true;
+  $("password-panel").hidden = false;
+  $("login-panel").hidden = true;
+  $("password-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+$("pw-form").addEventListener("submit", (event) => { event.preventDefault(); changePassword(); });
+
 $("logout-button").addEventListener("click", async () => {
-  await fetch("/api/logout", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+  await api("/api/logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}"
+  });
   renderLearners(null);
   $("requests").innerHTML = '<div class="loading">Sign in to see your requests.</div>';
   $("match-drawer").hidden = true;
   $("profile-menu").hidden = true;
   $("login-panel").hidden = false;
+  $("password-panel").hidden = true;
 });
+
 $("skill-search").addEventListener("input", (event) => {
   const term = event.target.value.toLowerCase();
   renderSkills(skills.filter((skill) => `${skill.skill_name} ${skill.category_name}`.toLowerCase().includes(term)));
 });
+
 load();
