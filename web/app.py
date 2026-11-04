@@ -38,6 +38,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.config import pg_connect
+from scripts.embeddings import embed, embedding_literal
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -362,6 +363,24 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "endpoint not found"}, 404)
                     return
 
+                if path == "/api/my-skills":
+                    user = self.session()
+                    if not user:
+                        self.send_json({"error": "Sign in required"}, 401)
+                        return
+                    self.send_json(query(
+                        """
+                        SELECT us.user_skill_id, us.skill_id, s.name AS skill_name,
+                               us.skill_type, us.proficiency_level, us.description
+                        FROM user_skills us
+                        JOIN skills s ON s.skill_id = us.skill_id
+                        WHERE us.user_id = %s
+                        ORDER BY us.skill_type, s.name
+                        """,
+                        (user["user_id"],),
+                    ))
+                    return
+
                 if path in ("/api/requests", "/api/matches"):
                     user = self.session()
                     if not user:
@@ -443,6 +462,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/login",
             "/api/register",
             "/api/logout",
+            "/api/user-skills",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -544,6 +564,55 @@ class Handler(BaseHTTPRequestHandler):
                     201,
                     cookie=self._session_cookie(token),
                 )
+                return
+
+            if path == "/api/user-skills":
+                if not self._require_csrf():
+                    return
+                user = self.session()
+                if not user:
+                    self.send_json({"error": "Sign in required"}, 401)
+                    return
+                skill_type = str(payload.get("skill_type", "")).upper()
+                if skill_type not in ("TEACH", "LEARN"):
+                    self.send_json({"error": "Choose whether you teach or learn this skill"}, 400)
+                    return
+                try:
+                    skill_id = int(payload.get("skill_id"))
+                except (TypeError, ValueError):
+                    self.send_json({"error": "Choose a valid skill"}, 400)
+                    return
+                proficiency = payload.get("proficiency_level") or None
+                if proficiency not in (None, "beginner", "intermediate", "advanced"):
+                    self.send_json({"error": "Choose a valid proficiency level"}, 400)
+                    return
+                description = str(payload.get("description", "")).strip()[:500]
+                skill_rows = query("SELECT name FROM skills WHERE skill_id = %s", (skill_id,))
+                if not skill_rows:
+                    self.send_json({"error": "Skill not found"}, 404)
+                    return
+                vector = embed(f"{skill_rows[0]['name']} {description} {skill_type}")
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO user_skills
+                                (user_id, skill_id, skill_type, proficiency_level,
+                                 description, embedding)
+                            VALUES (%s, %s, %s, %s, %s, %s::vector)
+                            ON CONFLICT (user_id, skill_id, skill_type)
+                            DO UPDATE SET proficiency_level = EXCLUDED.proficiency_level,
+                                          description = EXCLUDED.description,
+                                          embedding = EXCLUDED.embedding
+                            RETURNING user_skill_id
+                            """,
+                            (
+                                user["user_id"], skill_id, skill_type, proficiency,
+                                description or None, embedding_literal(vector),
+                            ),
+                        )
+                        user_skill_id = cur.fetchone()[0]
+                self.send_json({"user_skill_id": user_skill_id, "status": "saved"}, 201)
                 return
 
             # --- Create swap request (authenticated + CSRF) --------------

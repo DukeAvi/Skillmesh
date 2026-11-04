@@ -48,6 +48,43 @@
       </section>
 
       <div id="dashboard" hidden>
+      <nav class="dashboard-nav" aria-label="Dashboard sections">
+        <a href="#discover">Discover</a>
+        <a href="#my-skills">My skills</a>
+        <a href="#requests-section">Requests</a>
+        <a href="#leaderboard-section">Leaderboard</a>
+      </nav>
+      <section id="my-skills" class="workspace-panel">
+        <div class="section-head">
+          <div><p class="eyebrow">YOUR CONTRIBUTION</p><h2>Teach or learn a skill</h2></div>
+          <button id="refresh-my-skills" type="button">refresh</button>
+        </div>
+        <div class="workspace-grid">
+          <form id="skill-form" class="form-card">
+            <label>Skill
+              <select id="skill-choice" required><option value="">Choose a skill</option></select>
+            </label>
+            <label>I want to
+              <select id="skill-type" required>
+                <option value="TEACH">Teach this skill</option>
+                <option value="LEARN">Learn this skill</option>
+              </select>
+            </label>
+            <label>Level
+              <select id="skill-level">
+                <option value="">Not specified</option>
+                <option>beginner</option><option>intermediate</option><option>advanced</option>
+              </select>
+            </label>
+            <label>Description
+              <textarea id="skill-description" maxlength="500" placeholder="What would you like to share or learn?"></textarea>
+            </label>
+            <button type="submit">Add to my profile</button>
+            <p id="skill-form-message" class="form-message" role="status"></p>
+          </form>
+          <div id="my-skills-list" class="skill-cards"><div class="loading">loading your skills...</div></div>
+        </div>
+      </section>
       <section class="signal-grid" aria-label="Summary">
         <div class="signal signal-hot"><span>OPEN DEMAND</span><strong id="open-demand">—</strong><small>learner registrations</small></div>
         <div class="signal"><span>TEACHING SUPPLY</span><strong id="teaching-supply">—</strong><small>teacher registrations</small></div>
@@ -55,7 +92,7 @@
         <div class="signal"><span>VISIBLE SKILLS</span><strong id="skill-count">—</strong><small>catalogue coverage</small></div>
       </section>
 
-      <section class="observatory">
+      <section id="discover" class="observatory">
         <div class="section-head">
           <div><p class="eyebrow">01 / DEMAND FIELD</p><h2>Where learners are waiting</h2></div>
           <button id="refresh" type="button">↻ refresh readout</button>
@@ -86,7 +123,7 @@
         <div id="match-list" class="match-list"></div>
       </section>
 
-      <section class="lower-grid">
+      <section id="leaderboard-section" class="lower-grid">
         <article class="panel">
           <p class="eyebrow">02 / EXCHANGE LEAGUE</p><h2>Most active people</h2>
           <div id="leaderboard" class="table-wrap"><div class="loading">loading ranks...</div></div>
@@ -97,7 +134,7 @@
         </article>
       </section>
 
-      <section class="requests-panel">
+      <section id="requests-section" class="requests-panel">
         <div class="section-head">
           <div><p class="eyebrow">05 / YOUR EXCHANGE LOG</p><h2>Requests</h2></div>
           <button id="load-requests" type="button">refresh requests</button>

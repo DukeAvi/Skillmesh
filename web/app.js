@@ -60,6 +60,7 @@ function renderLearners(user) {
   $("dashboard").hidden = !currentUser;
   $("logout-button").hidden = !currentUser;
   $("login-button").hidden = Boolean(currentUser);
+  if (currentUser) loadMySkills();
 }
 
 function renderProfile() {
@@ -70,6 +71,22 @@ function renderProfile() {
   $("profile-email").textContent = currentUser?.email || "Choose a profile to continue";
   $("current-profile").textContent = currentUser ? `Searching as ${name}` : "Choose a profile above";
   $("current-profile").classList.toggle("ready", Boolean(currentUser));
+}
+
+function populateSkillChoices() {
+  $("skill-choice").innerHTML = '<option value="">Choose a skill</option>' +
+    skills.map((skill) => `<option value="${skill.skill_id}">${escapeHtml(skill.skill_name)}</option>`).join("");
+}
+
+async function loadMySkills() {
+  const response = await api("/api/my-skills");
+  if (!response.ok) return;
+  const rows = await response.json();
+  $("my-skills-list").innerHTML = rows.length ? rows.map((row) => `
+    <article class="skill-card">
+      <div><strong>${escapeHtml(row.skill_name)}</strong><small>${escapeHtml(row.proficiency_level || "level not specified")}</small></div>
+      <span class="skill-type">${row.skill_type === "TEACH" ? "TEACHING" : "LEARNING"}</span>
+    </article>`).join("") : '<div class="loading">Add a skill to start teaching or learning.</div>';
 }
 
 // --- Auth ----------------------------------------------------------------
@@ -195,6 +212,7 @@ async function load() {
     ]);
     if (health.error || skillRows.error) throw new Error(health.error || skillRows.error);
     skills = skillRows;
+    populateSkillChoices();
     renderLearners(userRows);
     renderSkills(skills);
     renderLeaderboard(leaderboard);
@@ -214,6 +232,30 @@ async function load() {
 $("refresh").addEventListener("click", load);
 $("close-matches").addEventListener("click", () => $("match-drawer").hidden = true);
 $("load-requests").addEventListener("click", loadRequests);
+$("refresh-my-skills").addEventListener("click", loadMySkills);
+
+$("skill-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("skill-form-message");
+  message.textContent = "";
+  const response = await api("/api/user-skills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      skill_id: Number($("skill-choice").value),
+      skill_type: $("skill-type").value,
+      proficiency_level: $("skill-level").value || null,
+      description: $("skill-description").value.trim()
+    })
+  });
+  const result = await response.json();
+  message.textContent = response.ok ? "Saved to your profile." : result.error;
+  if (response.ok) {
+    $("skill-form").reset();
+    loadMySkills();
+    load();
+  }
+});
 
 $("profile-button").addEventListener("click", () => {
   const menu = $("profile-menu");
