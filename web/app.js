@@ -60,6 +60,11 @@ function renderLearners(user) {
   $("dashboard").hidden = !currentUser;
   $("logout-button").hidden = !currentUser;
   $("login-button").hidden = Boolean(currentUser);
+  $("admin-panel").hidden = currentUser?.role !== "admin";
+  $("admin-link").hidden = currentUser?.role !== "admin";
+  $("setup-panel").hidden = !currentUser || currentUser.role === "admin";
+  if (!currentUser) { $("setup-form").reset(); $("setup-message").textContent = ""; }
+  if (!currentUser) { $("admin-form").reset(); $("admin-message").textContent = ""; }
   if (currentUser) loadMySkills();
 }
 
@@ -134,6 +139,40 @@ async function authenticate(path) {
 
 $("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
 $("register-button").addEventListener("click", () => authenticate("/api/register"));
+
+$("setup-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("setup-message");
+  try {
+    const response = await api("/api/admin/setup", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({code: $("setup-code").value})});
+    const result = await response.json();
+    $("setup-code").value = "";
+    if (!response.ok) { message.textContent = result.error; return; }
+    const me = await api("/api/me");
+    renderLearners(await me.json());
+  } catch (error) { $("setup-code").value = ""; message.textContent = "Could not reach the server."; }
+});
+
+$("admin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("admin-message");
+  message.textContent = "Creating account...";
+  try {
+    const response = await api("/api/admin/users", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name: $("admin-name").value, email: $("admin-email").value,
+        password: $("admin-password").value, role: $("admin-role").value})
+    });
+    const result = await response.json();
+    $("admin-password").value = "";
+    if (!response.ok) { message.textContent = result.error; return; }
+    $("admin-form").reset();
+    message.textContent = `Account created for ${result.email} (${result.role}).`;
+  } catch (error) {
+    $("admin-password").value = "";
+    message.textContent = "Could not reach the server. Please try again.";
+  }
+});
 
 // --- Requests & matches --------------------------------------------------
 

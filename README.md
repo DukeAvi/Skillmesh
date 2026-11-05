@@ -202,6 +202,26 @@ Sessions expire after 24 hours or when the web server restarts. Existing databas
 volumes work without a reset. The standalone fallback is `python web/app.py`
 after installing `requirements-web.txt` and starting PostgreSQL.
 
+### Admin account creation
+
+An admin can sign in, open **Admin**, and create student, mentor, or admin
+accounts. The creator remains signed in. Share the initial password privately;
+the app does not yet offer password changes or resets.
+
+For first-time setup, open the project's `.env` file in a text editor (create it
+if it does not exist) and add `SKILLMESH_SETUP_CODE=your-unique-random-code`.
+Choose a private random value of at least 16 characters. Recreate the web service
+so Compose picks it up: `docker compose up -d --build web`. Register and sign in,
+expand **Set up the first admin**, and enter the code. The Admin section then
+appears. Setup is disabled once an admin with a web password exists; seeded
+placeholder accounts do not count. Remove the code from `.env` and recreate the
+web service after setup. All account creation after this one-time configuration
+can be done in the GUI.
+
+Admin permissions are checked against the database on each creation request.
+Treat the setup code like a password and do setup only on a trusted network;
+HTTP does not encrypt it. Database access can also grant the admin role directly.
+
 ### Simulate on a hotspot or LAN
 
 1. Connect the host and teammate's device to the same hotspot or Wi-Fi network.

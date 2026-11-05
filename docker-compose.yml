@@ -69,6 +69,7 @@ services:
     environment:
       PG_DSN: postgresql://skillmesh:skillmesh@postgres:5432/skillmesh
       SKILLMESH_WEB_PORT: 8080
+      SKILLMESH_SETUP_CODE: ${SKILLMESH_SETUP_CODE:-}
     ports:
       - "8080:8080"
     depends_on:

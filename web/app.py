@@ -2,9 +2,9 @@
 
 Security features:
 - PBKDF2-SHA256 password hashing (600 000 rounds, per-user salt)
-- HMAC-signed session tokens (SERVER_SECRET, not guessable)
+- Random server-side session tokens
 - Brute-force rate limiting (5 attempts per email per 15 min window)
-- CSRF protection via X-CSRF-Token header on every mutating request
+- CSRF protection via X-CSRF-Token on authenticated data mutations
 - Per-session CSRF token delivered via /api/me
 - Secure cookie flags (HttpOnly, SameSite=Strict, Secure in production)
 - Input validation and length limits on every endpoint
@@ -45,7 +45,6 @@ from scripts.embeddings import embed, embedding_literal
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).parent
-SERVER_SECRET = os.getenv("SKILLMESH_SECRET", secrets.token_hex(32))
 SESSION_TTL = 86400  # 24 hours
 MAX_BODY = 16384     # 16 KiB
 
@@ -351,8 +350,14 @@ class Handler(BaseHTTPRequestHandler):
                     token = self._get_session_token()
                     sess = _get_session(token) if token else None
                     if sess:
+                        roles = query("SELECT role FROM users WHERE user_id = %s", (sess["user"]["user_id"],))
+                        if not roles:
+                            _destroy_session(token)
+                            self.send_json(None)
+                            return
                         self.send_json({
                             **sess["user"],
+                            "role": roles[0]["role"],
                             "csrf_token": sess["csrf"],
                         })
                     else:
@@ -463,6 +468,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/register",
             "/api/logout",
             "/api/user-skills",
+            "/api/admin/users",
+            "/api/admin/setup",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -500,7 +507,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 rows = query(
-                    "SELECT user_id, name, email, password_hash "
+                    "SELECT user_id, name, email, role, password_hash "
                     "FROM users WHERE lower(email) = %s",
                     (email,),
                 )
@@ -512,6 +519,7 @@ class Handler(BaseHTTPRequestHandler):
                     "user_id": rows[0]["user_id"],
                     "name": rows[0]["name"],
                     "email": rows[0]["email"],
+                    "role": rows[0]["role"],
                 }
                 token, csrf = _create_session(user)
                 self.send_json(
@@ -558,12 +566,71 @@ class Handler(BaseHTTPRequestHandler):
                             return
 
                 user = dict(zip(("user_id", "name", "email"), row))
+                user["role"] = "student"
                 token, csrf = _create_session(user)
                 self.send_json(
                     {**user, "csrf_token": csrf},
                     201,
                     cookie=self._session_cookie(token),
                 )
+                return
+
+            if path == "/api/admin/setup":
+                if not self._require_csrf():
+                    return
+                if not _check_rate_limit("__admin_setup__"):
+                    self.send_json({"error": "Too many setup attempts. Try again later."}, 429)
+                    return
+                setup_code = os.getenv("SKILLMESH_SETUP_CODE", "")
+                supplied = str(payload.get("code", ""))
+                if len(setup_code) < 16 or not hmac.compare_digest(setup_code.encode(), supplied.encode()):
+                    self.send_json({"error": "Invalid or unavailable setup code"}, 403)
+                    return
+                user = self.session()
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT pg_advisory_xact_lock(73655201)")
+                        cur.execute("SELECT 1 FROM users WHERE role = 'admin' AND password_hash LIKE 'pbkdf2_sha256$%' LIMIT 1")
+                        if cur.fetchone():
+                            self.send_json({"error": "An admin account already exists"}, 409)
+                            return
+                        cur.execute("UPDATE users SET role = 'admin' WHERE user_id = %s RETURNING user_id", (user["user_id"],))
+                        if not cur.fetchone():
+                            self.send_json({"error": "Account no longer exists"}, 401)
+                            return
+                self.send_json({"ok": True})
+                return
+
+            if path == "/api/admin/users":
+                if not self._require_csrf():
+                    return
+                user = self.session()
+                roles = query("SELECT role FROM users WHERE user_id = %s", (user["user_id"],))
+                if not roles or roles[0]["role"] != "admin":
+                    self.send_json({"error": "Admin access required"}, 403)
+                    return
+                name = str(payload.get("name", "")).strip()
+                email = str(payload.get("email", "")).strip().lower()
+                password = str(payload.get("password", ""))
+                role = payload.get("role")
+                if not name or len(name) > 100 or not email or "@" not in email or len(email) > 254:
+                    self.send_json({"error": "Enter a valid name and email"}, 400)
+                    return
+                if role not in ("student", "mentor", "admin"):
+                    self.send_json({"error": "Choose a valid role"}, 400)
+                    return
+                error = _validate_password_strength(password)
+                if error:
+                    self.send_json({"error": error}, 400)
+                    return
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO NOTHING RETURNING user_id", (name, email, password_hash(password), role))
+                        row = cur.fetchone()
+                if not row:
+                    self.send_json({"error": "An account with that email already exists"}, 409)
+                    return
+                self.send_json({"user_id": row[0], "name": name, "email": email, "role": role}, 201)
                 return
 
             if path == "/api/user-skills":

@@ -53,7 +53,28 @@
         <a href="#my-skills">My skills</a>
         <a href="#requests-section">Requests</a>
         <a href="#leaderboard-section">Leaderboard</a>
+        <a id="admin-link" href="#admin-panel" hidden>Admin</a>
       </nav>
+      <details id="setup-panel" class="workspace-panel">
+        <summary>Set up the first admin</summary>
+        <form id="setup-form" class="form-card">
+          <label>Setup code <input id="setup-code" type="password" minlength="16" required autocomplete="off"></label>
+          <button type="submit">Make my account an admin</button>
+          <p id="setup-message" class="form-message" role="status"></p>
+        </form>
+      </details>
+      <section id="admin-panel" class="workspace-panel" hidden>
+        <div class="section-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Create an account</h2></div></div>
+        <form id="admin-form" class="form-card">
+          <label>Name <input id="admin-name" maxlength="100" required autocomplete="off"></label>
+          <label>Email <input id="admin-email" type="email" maxlength="254" required autocomplete="off"></label>
+          <label>Initial password <input id="admin-password" type="password" minlength="8" maxlength="256" required autocomplete="new-password"></label>
+          <small>Use at least 8 characters, including uppercase, lowercase and a digit.</small>
+          <label>Role <select id="admin-role"><option value="student">Student</option><option value="mentor">Mentor</option><option value="admin">Admin</option></select></label>
+          <button type="submit">Create account</button>
+          <p id="admin-message" class="form-message" role="status"></p>
+        </form>
+      </section>
       <section id="my-skills" class="workspace-panel">
         <div class="section-head">
           <div><p class="eyebrow">YOUR CONTRIBUTION</p><h2>Teach or learn a skill</h2></div>
