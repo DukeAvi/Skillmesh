@@ -28,6 +28,7 @@ import secrets
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from collections import defaultdict
 from decimal import Decimal
 from http.cookies import SimpleCookie
@@ -92,6 +93,7 @@ def ensure_arjun_is_admin() -> None:
     """Keep the single designated administrator aligned with the seed policy."""
     with pg_connect() as conn:
         with conn.cursor() as cur:
+            ensure_moderation_schema(cur)
             cur.execute(
                 "UPDATE users SET role = 'student' "
                 "WHERE role = 'admin' "
@@ -102,6 +104,45 @@ def ensure_arjun_is_admin() -> None:
                 "UPDATE users SET role = 'admin' "
                 "WHERE lower(name) LIKE 'arjun%' OR lower(email) = 'arjun@campus.edu'"
             )
+
+
+def ensure_moderation_schema(cur) -> None:
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS abuse_reports (
+            report_id BIGSERIAL PRIMARY KEY,
+            reporter_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            reported_user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 5 AND 1000),
+            status TEXT NOT NULL DEFAULT 'open'
+                   CHECK (status IN ('open', 'reviewed', 'dismissed')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (reporter_id <> reported_user_id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'abuse_reports' AND column_name = 'reported_id'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'abuse_reports' AND column_name = 'reported_user_id'
+            ) THEN
+                ALTER TABLE abuse_reports RENAME COLUMN reported_id TO reported_user_id;
+            END IF;
+        END
+        $$;
+        """
+    )
+    cur.execute(
+        "ALTER TABLE abuse_reports ADD COLUMN IF NOT EXISTS status TEXT "
+        "NOT NULL DEFAULT 'open'"
+    )
 
 
 def is_moderator(user: dict | None) -> bool:
@@ -329,7 +370,13 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return None
         sess = _get_session(token)
-        return sess["user"] if sess else None
+        if not sess:
+            return None
+        rows = query("SELECT banned_at FROM users WHERE user_id = %s", (sess["user"]["user_id"],))
+        if not rows or rows[0]["banned_at"] is not None:
+            _destroy_session(token)
+            return None
+        return sess["user"]
 
     def _require_csrf(self) -> bool:
         """Validate the CSRF token for mutating requests. Return True if OK."""
@@ -372,8 +419,11 @@ class Handler(BaseHTTPRequestHandler):
                     token = self._get_session_token()
                     sess = _get_session(token) if token else None
                     if sess:
-                        roles = query("SELECT role FROM users WHERE user_id = %s", (sess["user"]["user_id"],))
-                        if not roles:
+                        roles = query(
+                            "SELECT role, banned_at FROM users WHERE user_id = %s",
+                            (sess["user"]["user_id"],),
+                        )
+                        if not roles or roles[0]["banned_at"] is not None:
                             _destroy_session(token)
                             self.send_json(None)
                             return
@@ -387,7 +437,19 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 if path == "/api/users":
-                    self.send_json({"error": "endpoint not found"}, 404)
+                    user = self.session()
+                    if not user:
+                        self.send_json({"error": "Sign in required"}, 401)
+                        return
+                    self.send_json(query(
+                        """
+                        SELECT user_id, name, role, department, bio
+                        FROM users
+                        WHERE role <> 'admin' AND user_id <> %s AND banned_at IS NULL
+                        ORDER BY name
+                        """,
+                        (user["user_id"],),
+                    ))
                     return
 
                 if path == "/api/my-skills":
@@ -461,6 +523,18 @@ class Handler(BaseHTTPRequestHandler):
                                        u.name AS reviewer_name, f.rating, f.comment
                                 FROM feedback f JOIN users u ON u.user_id = f.reviewer_id
                                 ORDER BY f.created_at DESC
+                                """
+                            ),
+                            "reports": query(
+                                """
+                                SELECT ar.report_id, ar.reason, ar.status, ar.created_at,
+                                       ar.reported_user_id, reported.name AS reported_name,
+                                       ar.reporter_id, reporter.name AS reporter_name,
+                                       reported.banned_at
+                                FROM abuse_reports ar
+                                JOIN users reported ON reported.user_id = ar.reported_user_id
+                                JOIN users reporter ON reporter.user_id = ar.reporter_id
+                                ORDER BY ar.created_at DESC
                                 """
                             ),
                     })
@@ -549,6 +623,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/logout",
             "/api/user-skills",
             "/api/moderation",
+            "/api/reports",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -586,12 +661,15 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 rows = query(
-                    "SELECT user_id, name, email, role, password_hash "
+                    "SELECT user_id, name, email, role, password_hash, banned_at "
                     "FROM users WHERE lower(email) = %s",
                     (email,),
                 )
                 if not rows or not verify_password(password, rows[0]["password_hash"]):
                     self.send_json({"error": "Invalid email or password"}, 401)
+                    return
+                if rows[0]["banned_at"] is not None:
+                    self.send_json({"error": "This account has been banned"}, 403)
                     return
 
                 user = {
@@ -703,6 +781,36 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"user_skill_id": user_skill_id, "status": "saved"}, 201)
                 return
 
+            if path == "/api/reports":
+                if not self._require_csrf():
+                    return
+                user = self.session()
+                if not user or user.get("role") == "admin":
+                    self.send_json({"error": "Only non-admin users can submit reports"}, 403)
+                    return
+                reported_id = int(payload.get("reported_user_id"))
+                reason = str(payload.get("reason", "")).strip()
+                if reported_id == user["user_id"]:
+                    raise ValueError("You cannot report yourself")
+                if not 5 <= len(reason) <= 1000:
+                    raise ValueError("Reason must be between 5 and 1000 characters")
+                target = query(
+                    "SELECT user_id FROM users WHERE user_id = %s AND role <> 'admin' AND banned_at IS NULL",
+                    (reported_id,),
+                )
+                if not target:
+                    raise ValueError("User cannot be reported")
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        ensure_moderation_schema(cur)
+                        cur.execute(
+                            "INSERT INTO abuse_reports (reporter_id, reported_user_id, reason) "
+                            "VALUES (%s, %s, %s)",
+                            (user["user_id"], reported_id, reason),
+                        )
+                self.send_json({"ok": True}, 201)
+                return
+
             if path == "/api/moderation":
                 user = self.session()
                 if not is_moderator(user):
@@ -793,6 +901,29 @@ class Handler(BaseHTTPRequestHandler):
                             if user_id == user["user_id"]:
                                 raise ValueError("Arjun cannot delete his own account")
                             cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+                        elif action in ("ban-user", "unban-user"):
+                            user_id = int(payload["user_id"])
+                            if user_id == user["user_id"]:
+                                raise ValueError("Arjun cannot ban himself")
+                            cur.execute(
+                                "UPDATE users SET banned_at = %s "
+                                "WHERE user_id = %s AND role <> 'admin'",
+                                (
+                                    None if action == "unban-user"
+                                    else datetime.now(timezone.utc),
+                                    user_id,
+                                ),
+                            )
+                            if cur.rowcount != 1:
+                                raise ValueError("Only non-admin users can be banned")
+                        elif action == "report-status":
+                            status = str(payload["status"])
+                            if status not in ("open", "reviewed", "dismissed"):
+                                raise ValueError("Invalid report status")
+                            cur.execute(
+                                "UPDATE abuse_reports SET status = %s WHERE report_id = %s",
+                                (status, int(payload["report_id"])),
+                            )
                         else:
                             raise ValueError("Unknown moderation action")
                 self.send_json({"ok": True})

@@ -90,6 +90,7 @@
           <article><h3>Availability</h3><div id="moderator-slots" class="table-wrap"></div></article>
           <article><h3>Sessions</h3><div id="moderator-sessions" class="table-wrap"></div></article>
           <article><h3>Feedback</h3><div id="moderator-feedback" class="table-wrap"></div></article>
+          <article><h3>Abuse reports</h3><div id="moderator-reports" class="table-wrap"></div></article>
         </div>
         <p id="moderator-message" class="form-message" role="status"></p>
       </section>
@@ -151,6 +152,14 @@
             <p class="annotation-copy">The gap is calculated from distinct registrations, not session volume. A positive value is a useful signal for recruiting mentors.</p>
           </aside>
         </div>
+      </section>
+
+      <section id="community" class="workspace-panel">
+        <div class="section-head">
+          <div><p class="eyebrow">COMMUNITY</p><h2>People on SkillMesh</h2></div>
+          <button id="refresh-community" type="button">refresh people</button>
+        </div>
+        <div id="community-list" class="user-cards"><div class="loading">loading people...</div></div>
       </section>
 
       <section id="match-drawer" class="match-drawer" hidden>

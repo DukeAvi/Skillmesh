@@ -62,7 +62,10 @@ function renderLearners(user) {
   $("login-button").hidden = Boolean(currentUser);
   $("moderator-link").hidden = !currentUser || currentUser.role !== "admin";
   $("moderator-panel").hidden = !currentUser || currentUser.role !== "admin";
-  if (currentUser) loadMySkills();
+  if (currentUser) {
+    loadMySkills();
+    loadCommunity();
+  }
   if (currentUser?.role === "admin") loadModerator();
 }
 
@@ -113,6 +116,11 @@ function renderModerator(data) {
   $("moderator-feedback").innerHTML = `<table><thead><tr><th>ID</th><th>SESSION</th><th>RATING</th><th>ACTION</th></tr></thead><tbody>${
     data.feedback.map((row) => `<tr><td>${row.feedback_id}</td><td>${row.session_id}</td><td>${row.rating}/5</td><td>${moderatorButton("delete-feedback", row.feedback_id, "delete")}</td></tr>`).join("")
   }</tbody></table>`;
+  $("moderator-reports").innerHTML = `<table><thead><tr><th>REPORT</th><th>REPORTED</th><th>REASON</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${
+    data.reports.map((row) => `<tr><td>${row.report_id}</td><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reason)}</td><td>${row.status}${row.banned_at ? " / BANNED" : ""}</td><td>${
+      row.banned_at ? moderatorButton("unban-user", row.reported_user_id, "unban") : moderatorButton("ban-user", row.reported_user_id, "ban")
+    }${row.status === "open" ? moderatorButton("report-status", row.report_id, "review", "reviewed") : ""}</td></tr>`).join("")
+  }</tbody></table>`;
   $("moderator-slot-skill").innerHTML = '<option value="">Skill</option>' +
     data.skills.map((row) => `<option value="${row.skill_id}">${escapeHtml(row.name)}</option>`).join("");
 }
@@ -122,6 +130,29 @@ async function loadModerator() {
   if (response.ok) renderModerator(await response.json());
 }
 
+async function loadCommunity() {
+  const response = await api("/api/users");
+  if (!response.ok) return;
+  const rows = await response.json();
+  $("community-list").innerHTML = rows.length ? rows.map((row) => `
+    <article class="user-card">
+      <div><h3>${escapeHtml(row.name)}</h3><p>${escapeHtml(row.role)}${row.department ? ` · ${escapeHtml(row.department)}` : ""}</p></div>
+      <button class="report-button" data-report-user="${row.user_id}" type="button">Report abuse</button>
+    </article>`).join("") : '<div class="loading">No other users to show.</div>';
+}
+
+async function reportUser(userId) {
+  const reason = window.prompt("Why are you reporting this user?");
+  if (reason === null) return;
+  const response = await api("/api/reports", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({reported_user_id: Number(userId), reason})
+  });
+  const result = await response.json();
+  window.alert(response.ok ? "Report submitted to Arjun." : result.error);
+}
+
 async function moderatorAction(action, id, status) {
   if (action === "delete-user" || action === "delete-feedback") {
     if (!window.confirm("Apply this destructive action?")) return;
@@ -129,7 +160,14 @@ async function moderatorAction(action, id, status) {
   const response = await api("/api/moderation", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action, [`${action === "delete-user" ? "user" : action === "delete-feedback" ? "feedback" : action === "request-status" ? "request" : action === "slot-status" ? "slot" : "session"}_id`]: Number(id), status})
+    body: JSON.stringify({
+      action,
+      [`${action === "delete-user" || action === "ban-user" || action === "unban-user"
+        ? "user" : action === "delete-feedback" ? "feedback"
+        : action === "request-status" ? "request" : action === "slot-status"
+        ? "slot" : action === "report-status" ? "report" : "session"}_id`]: Number(id),
+      status
+    })
   });
   const result = await response.json();
   $("moderator-message").textContent = response.ok ? "Moderation change saved." : result.error;
@@ -222,10 +260,14 @@ async function openMatches(skillId) {
     <article class="match-card">
       <h3>${escapeHtml(row.provider_name)}</h3>
       <p>Similarity ${(Number(row.similarity) * 100).toFixed(1)}%<br>Average rating ${row.rating}/5</p>
+      <button class="report-button report-match-button" data-report-user="${row.provider_id}" type="button">report user</button>
       <button class="request-button" data-provider="${row.provider_id}" data-similarity="${row.similarity}" type="button">send request</button>
     </article>`).join("") : '<div class="loading">No teacher matches found for this skill.</div>';
   document.querySelectorAll(".request-button").forEach((button) => {
     button.addEventListener("click", () => createRequest(button));
+  });
+  document.querySelectorAll(".report-match-button").forEach((button) => {
+    button.addEventListener("click", () => reportUser(button.dataset.reportUser));
   });
 }
 
@@ -281,6 +323,11 @@ $("close-matches").addEventListener("click", () => $("match-drawer").hidden = tr
 $("load-requests").addEventListener("click", loadRequests);
 $("refresh-my-skills").addEventListener("click", loadMySkills);
 $("refresh-moderator").addEventListener("click", loadModerator);
+$("refresh-community").addEventListener("click", loadCommunity);
+$("community-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-report-user]");
+  if (button) reportUser(button.dataset.reportUser);
+});
 
 $("moderator-panel").addEventListener("click", (event) => {
   const button = event.target.closest("[data-mod-action]");

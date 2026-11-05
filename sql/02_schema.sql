@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash  TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'student'
                    CHECK (role IN ('student', 'mentor', 'admin')),
+    banned_at      TIMESTAMPTZ,
     department     TEXT,
     year_of_study  INT  CHECK (year_of_study BETWEEN 1 AND 6),
     bio            TEXT,
@@ -120,4 +121,15 @@ CREATE TABLE IF NOT EXISTS feedback (
     comment      TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (session_id, reviewer_id)
+);
+
+CREATE TABLE IF NOT EXISTS abuse_reports (
+    report_id       BIGSERIAL PRIMARY KEY,
+    reporter_id     BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    reported_user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    reason          TEXT NOT NULL CHECK (char_length(reason) BETWEEN 5 AND 1000),
+    status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'reviewed', 'dismissed')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (reporter_id <> reported_user_id)
 );
