@@ -66,8 +66,8 @@ INSERT INTO users (name, email, password_hash, role, department, year_of_study, 
      'Music department student teaching piano and guitar, learning maths.'),
     ('Kabir Singh',   'kabir.singh@campus.edu',   'placeholder-hash-kabir',  'student', 'Mathematics',2,
      'Mathematics student, calculus tutor, curious about machine learning.'),
-    ('Meera Nair',    'meera.nair@campus.edu',    'placeholder-hash-meera',  'admin',   'Physical Ed',5,
-     'Sports secretary and campus events admin; badminton captain.');
+    ('Arjun',         'arjun@campus.edu',         'placeholder-hash-arjun',   'admin',   'CSE',        3,
+     'SkillMesh administrator and campus skill-swap coordinator.');
 
 -- ---------------------------------------------------------------------------
 -- 15 user_skills rows, mixing TEACH and LEARN, with a unique description per
@@ -141,12 +141,12 @@ INSERT INTO user_skills (user_id, skill_id, skill_type, proficiency_level, descr
      'LEARN', 'intermediate',
      'I want to learn machine learning - regression, classification, clustering and scikit-learn in Python.'),
 
-    ((SELECT user_id FROM users WHERE email = 'meera.nair@campus.edu'),
+    ((SELECT user_id FROM users WHERE email = 'arjun@campus.edu'),
      (SELECT skill_id FROM skills WHERE name = 'Badminton'),
      'TEACH', 'advanced',
      'I teach badminton: grip, footwork, smash technique, doubles rotation and match strategy.'),
 
-    ((SELECT user_id FROM users WHERE email = 'meera.nair@campus.edu'),
+    ((SELECT user_id FROM users WHERE email = 'arjun@campus.edu'),
      (SELECT skill_id FROM skills WHERE name = 'Spanish'),
      'LEARN', 'beginner',
      'I am a beginner at Spanish and want to learn greetings and simple everyday conversation.');
@@ -168,7 +168,7 @@ INSERT INTO swap_requests (request_id, requester_id, provider_id, skill_id, simi
     (3, (SELECT user_id FROM users WHERE email = 'aarav.sharma@campus.edu'),
         (SELECT user_id FROM users WHERE email = 'ananya.iyer@campus.edu'),
         (SELECT skill_id FROM skills WHERE name = 'Piano'), 0.74, 'accepted'),
-    (4, (SELECT user_id FROM users WHERE email = 'meera.nair@campus.edu'),
+    (4, (SELECT user_id FROM users WHERE email = 'arjun@campus.edu'),
         (SELECT user_id FROM users WHERE email = 'ananya.iyer@campus.edu'),
         (SELECT skill_id FROM skills WHERE name = 'Guitar'), 0.83, 'accepted'),
     (5, (SELECT user_id FROM users WHERE email = 'kabir.singh@campus.edu'),
@@ -239,7 +239,7 @@ INSERT INTO swap_sessions (session_id, request_id, provider_id, learner_id, skil
         (SELECT skill_id FROM skills WHERE name = 'Piano'), 3,
         'completed', NOW() - INTERVAL '27 days', NOW() - INTERVAL '26 days'),
     (4, 4, (SELECT user_id FROM users WHERE email = 'ananya.iyer@campus.edu'),
-        (SELECT user_id FROM users WHERE email = 'meera.nair@campus.edu'),
+        (SELECT user_id FROM users WHERE email = 'arjun@campus.edu'),
         (SELECT skill_id FROM skills WHERE name = 'Guitar'), 4,
         'completed', NOW() - INTERVAL '25 days', NOW() - INTERVAL '24 days'),
     (5, 5, (SELECT user_id FROM users WHERE email = 'rohan.mehta@campus.edu'),

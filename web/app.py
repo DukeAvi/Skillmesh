@@ -88,6 +88,28 @@ def _destroy_session(token: str) -> None:
         SESSIONS.pop(token, None)
 
 
+def ensure_arjun_is_admin() -> None:
+    """Keep the single designated administrator aligned with the seed policy."""
+    with pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET role = 'student' "
+                "WHERE role = 'admin' "
+                "AND lower(name) NOT LIKE 'arjun%' "
+                "AND lower(email) <> 'arjun@campus.edu'"
+            )
+            cur.execute(
+                "UPDATE users SET role = 'admin' "
+                "WHERE lower(name) LIKE 'arjun%' OR lower(email) = 'arjun@campus.edu'"
+            )
+
+
+def is_moderator(user: dict | None) -> bool:
+    return bool(user and (str(user.get("name", "")).lower().startswith("arjun")
+                or str(user.get("email", "")).lower() == "arjun@campus.edu")
+                and user.get("role") == "admin")
+
+
 # ---------------------------------------------------------------------------
 # Rate limiter (in-memory, per email)
 # ---------------------------------------------------------------------------
@@ -386,6 +408,64 @@ class Handler(BaseHTTPRequestHandler):
                     ))
                     return
 
+                if path == "/api/moderation":
+                    user = self.session()
+                    if not is_moderator(user):
+                        self.send_json({"error": "Moderator access required"}, 403)
+                        return
+                    self.send_json({
+                            "users": query(
+                                "SELECT user_id, name, email, role, created_at FROM users ORDER BY user_id"
+                            ),
+                            "skills": query(
+                                "SELECT skill_id, name, description FROM skills ORDER BY name"
+                            ),
+                            "requests": query(
+                                """
+                                SELECT sr.request_id, sr.status, s.name AS skill_name,
+                                       requester.name AS requester_name, provider.name AS provider_name
+                                FROM swap_requests sr
+                                JOIN skills s ON s.skill_id = sr.skill_id
+                                JOIN users requester ON requester.user_id = sr.requester_id
+                                JOIN users provider ON provider.user_id = sr.provider_id
+                                ORDER BY sr.created_at DESC
+                                """
+                            ),
+                            "slots": query(
+                                """
+                                SELECT a.slot_id, a.provider_id, u.name AS provider_name,
+                                       a.skill_id, s.name AS skill_name, a.start_time,
+                                       a.end_time, a.status
+                                FROM availability_slots a
+                                JOIN users u ON u.user_id = a.provider_id
+                                JOIN skills s ON s.skill_id = a.skill_id
+                                ORDER BY a.start_time DESC
+                                """
+                            ),
+                            "sessions": query(
+                                """
+                                SELECT ss.session_id, ss.status, ss.provider_id,
+                                       provider.name AS provider_name, ss.learner_id,
+                                       learner.name AS learner_name, s.name AS skill_name,
+                                       ss.slot_id
+                                FROM swap_sessions ss
+                                JOIN users provider ON provider.user_id = ss.provider_id
+                                JOIN users learner ON learner.user_id = ss.learner_id
+                                JOIN skills s ON s.skill_id = ss.skill_id
+                                ORDER BY ss.created_at DESC
+                                """
+                            ),
+                            "feedback": query(
+                                """
+                                SELECT f.feedback_id, f.session_id, f.reviewer_id,
+                                       u.name AS reviewer_name, f.rating, f.comment
+                                FROM feedback f JOIN users u ON u.user_id = f.reviewer_id
+                                ORDER BY f.created_at DESC
+                                """
+                            ),
+                    })
+                    return
+
                 if path in ("/api/requests", "/api/matches"):
                     user = self.session()
                     if not user:
@@ -468,8 +548,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/register",
             "/api/logout",
             "/api/user-skills",
-            "/api/admin/users",
-            "/api/admin/setup",
+            "/api/moderation",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -575,64 +654,6 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
-            if path == "/api/admin/setup":
-                if not self._require_csrf():
-                    return
-                if not _check_rate_limit("__admin_setup__"):
-                    self.send_json({"error": "Too many setup attempts. Try again later."}, 429)
-                    return
-                setup_code = os.getenv("SKILLMESH_SETUP_CODE", "")
-                supplied = str(payload.get("code", ""))
-                if len(setup_code) < 16 or not hmac.compare_digest(setup_code.encode(), supplied.encode()):
-                    self.send_json({"error": "Invalid or unavailable setup code"}, 403)
-                    return
-                user = self.session()
-                with pg_connect() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_advisory_xact_lock(73655201)")
-                        cur.execute("SELECT 1 FROM users WHERE role = 'admin' AND password_hash LIKE 'pbkdf2_sha256$%' LIMIT 1")
-                        if cur.fetchone():
-                            self.send_json({"error": "An admin account already exists"}, 409)
-                            return
-                        cur.execute("UPDATE users SET role = 'admin' WHERE user_id = %s RETURNING user_id", (user["user_id"],))
-                        if not cur.fetchone():
-                            self.send_json({"error": "Account no longer exists"}, 401)
-                            return
-                self.send_json({"ok": True})
-                return
-
-            if path == "/api/admin/users":
-                if not self._require_csrf():
-                    return
-                user = self.session()
-                roles = query("SELECT role FROM users WHERE user_id = %s", (user["user_id"],))
-                if not roles or roles[0]["role"] != "admin":
-                    self.send_json({"error": "Admin access required"}, 403)
-                    return
-                name = str(payload.get("name", "")).strip()
-                email = str(payload.get("email", "")).strip().lower()
-                password = str(payload.get("password", ""))
-                role = payload.get("role")
-                if not name or len(name) > 100 or not email or "@" not in email or len(email) > 254:
-                    self.send_json({"error": "Enter a valid name and email"}, 400)
-                    return
-                if role not in ("student", "mentor", "admin"):
-                    self.send_json({"error": "Choose a valid role"}, 400)
-                    return
-                error = _validate_password_strength(password)
-                if error:
-                    self.send_json({"error": error}, 400)
-                    return
-                with pg_connect() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("INSERT INTO users (name, email, password_hash, role) VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO NOTHING RETURNING user_id", (name, email, password_hash(password), role))
-                        row = cur.fetchone()
-                if not row:
-                    self.send_json({"error": "An account with that email already exists"}, 409)
-                    return
-                self.send_json({"user_id": row[0], "name": name, "email": email, "role": role}, 201)
-                return
-
             if path == "/api/user-skills":
                 if not self._require_csrf():
                     return
@@ -682,6 +703,101 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"user_skill_id": user_skill_id, "status": "saved"}, 201)
                 return
 
+            if path == "/api/moderation":
+                user = self.session()
+                if not is_moderator(user):
+                    self.send_json({"error": "Moderator access required"}, 403)
+                    return
+                action = str(payload.get("action", ""))
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        if action == "set-role":
+                            user_id = int(payload["user_id"])
+                            role = str(payload["role"])
+                            if role not in ("student", "mentor", "admin"):
+                                raise ValueError("Invalid role")
+                            target = query("SELECT name FROM users WHERE user_id = %s", (user_id,))
+                            if not target:
+                                raise ValueError("User not found")
+                            target_is_arjun = target[0]["name"].lower() == "arjun"
+                            if role == "admin" and not target_is_arjun:
+                                raise ValueError("Only Arjun can be an admin")
+                            if target_is_arjun and role != "admin":
+                                raise ValueError("Arjun must remain an admin")
+                            cur.execute(
+                                "UPDATE users SET role = %s WHERE user_id = %s RETURNING user_id",
+                                (role, user_id),
+                            )
+                            if not cur.fetchone():
+                                raise ValueError("User not found")
+                        elif action == "create-skill":
+                            name = str(payload.get("name", "")).strip()
+                            category = str(payload.get("category", "")).strip()
+                            description = str(payload.get("description", "")).strip() or None
+                            if not name or not category:
+                                raise ValueError("Skill name and category are required")
+                            cur.execute(
+                                "INSERT INTO skill_categories (name) VALUES (%s) "
+                                "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name "
+                                "RETURNING category_id",
+                                (category,),
+                            )
+                            category_id = cur.fetchone()[0]
+                            cur.execute(
+                                "INSERT INTO skills (category_id, name, description) VALUES (%s, %s, %s)",
+                                (category_id, name, description),
+                            )
+                        elif action == "request-status":
+                            status = str(payload["status"])
+                            if status not in ("pending", "accepted", "rejected", "cancelled"):
+                                raise ValueError("Invalid request status")
+                            cur.execute(
+                                "UPDATE swap_requests SET status = %s WHERE request_id = %s",
+                                (status, int(payload["request_id"])),
+                            )
+                        elif action == "create-slot":
+                            cur.execute(
+                                """
+                                INSERT INTO availability_slots
+                                    (provider_id, skill_id, start_time, end_time)
+                                VALUES (%s, %s, %s, %s)
+                                """,
+                                (int(payload["provider_id"]), int(payload["skill_id"]),
+                                 payload["start_time"], payload["end_time"]),
+                            )
+                        elif action == "slot-status":
+                            status = str(payload["status"])
+                            if status not in ("open", "booked", "cancelled"):
+                                raise ValueError("Invalid slot status")
+                            cur.execute(
+                                "UPDATE availability_slots SET status = %s WHERE slot_id = %s",
+                                (status, int(payload["slot_id"])),
+                            )
+                        elif action == "session-status":
+                            status = str(payload["status"])
+                            if status not in ("scheduled", "completed", "cancelled"):
+                                raise ValueError("Invalid session status")
+                            cur.execute(
+                                "UPDATE swap_sessions SET status = %s, "
+                                "completed_at = CASE WHEN %s = 'completed' THEN COALESCE(completed_at, NOW()) ELSE completed_at END "
+                                "WHERE session_id = %s",
+                                (status, status, int(payload["session_id"])),
+                            )
+                        elif action == "delete-feedback":
+                            cur.execute(
+                                "DELETE FROM feedback WHERE feedback_id = %s",
+                                (int(payload["feedback_id"]),),
+                            )
+                        elif action == "delete-user":
+                            user_id = int(payload["user_id"])
+                            if user_id == user["user_id"]:
+                                raise ValueError("Arjun cannot delete his own account")
+                            cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+                        else:
+                            raise ValueError("Unknown moderation action")
+                self.send_json({"ok": True})
+                return
+
             # --- Create swap request (authenticated + CSRF) --------------
             if not self._require_csrf():
                 return
@@ -708,6 +824,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     port = int(os.getenv("SKILLMESH_WEB_PORT", "8080"))
+    ensure_arjun_is_admin()
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"SkillMesh observatory listening on http://localhost:{port}")
     print(f"Security: PBKDF2-SHA256 · CSRF tokens · rate limiting · secure headers")

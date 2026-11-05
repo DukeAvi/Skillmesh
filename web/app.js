@@ -60,12 +60,10 @@ function renderLearners(user) {
   $("dashboard").hidden = !currentUser;
   $("logout-button").hidden = !currentUser;
   $("login-button").hidden = Boolean(currentUser);
-  $("admin-panel").hidden = currentUser?.role !== "admin";
-  $("admin-link").hidden = currentUser?.role !== "admin";
-  $("setup-panel").hidden = !currentUser || currentUser.role === "admin";
-  if (!currentUser) { $("setup-form").reset(); $("setup-message").textContent = ""; }
-  if (!currentUser) { $("admin-form").reset(); $("admin-message").textContent = ""; }
+  $("moderator-link").hidden = !currentUser || currentUser.role !== "admin";
+  $("moderator-panel").hidden = !currentUser || currentUser.role !== "admin";
   if (currentUser) loadMySkills();
+  if (currentUser?.role === "admin") loadModerator();
 }
 
 function renderProfile() {
@@ -92,6 +90,50 @@ async function loadMySkills() {
       <div><strong>${escapeHtml(row.skill_name)}</strong><small>${escapeHtml(row.proficiency_level || "level not specified")}</small></div>
       <span class="skill-type">${row.skill_type === "TEACH" ? "TEACHING" : "LEARNING"}</span>
     </article>`).join("") : '<div class="loading">Add a skill to start teaching or learning.</div>';
+}
+
+function moderatorButton(action, id, label, status) {
+  const statusAttr = status ? ` data-status="${status}"` : "";
+  return `<button class="moderator-action" data-mod-action="${action}" data-id="${id}"${statusAttr}>${label}</button>`;
+}
+
+function renderModerator(data) {
+  $("moderator-users").innerHTML = `<table><thead><tr><th>ID</th><th>NAME</th><th>ROLE</th><th>ACTION</th></tr></thead><tbody>${
+    data.users.map((row) => `<tr><td>${row.user_id}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.role)}</td><td>${moderatorButton("delete-user", row.user_id, "delete")}</td></tr>`).join("")
+  }</tbody></table>`;
+  $("moderator-requests").innerHTML = `<table><thead><tr><th>ID</th><th>SKILL</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${
+    data.requests.map((row) => `<tr><td>${row.request_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${moderatorButton("request-status", row.request_id, "accept", "accepted")}${moderatorButton("request-status", row.request_id, "reject", "rejected")}</td></tr>`).join("")
+  }</tbody></table>`;
+  $("moderator-slots").innerHTML = `<table><thead><tr><th>ID</th><th>PROVIDER</th><th>WHEN</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${
+    data.slots.map((row) => `<tr><td>${row.slot_id}</td><td>${escapeHtml(row.provider_name)}</td><td>${new Date(row.start_time).toLocaleString()}</td><td>${row.status}</td><td>${row.status === "open" ? moderatorButton("slot-status", row.slot_id, "cancel", "cancelled") : ""}</td></tr>`).join("")
+  }</tbody></table>`;
+  $("moderator-sessions").innerHTML = `<table><thead><tr><th>ID</th><th>SKILL</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${
+    data.sessions.map((row) => `<tr><td>${row.session_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${row.status === "scheduled" ? moderatorButton("session-status", row.session_id, "complete", "completed") : ""}${row.status !== "cancelled" ? moderatorButton("session-status", row.session_id, "cancel", "cancelled") : ""}</td></tr>`).join("")
+  }</tbody></table>`;
+  $("moderator-feedback").innerHTML = `<table><thead><tr><th>ID</th><th>SESSION</th><th>RATING</th><th>ACTION</th></tr></thead><tbody>${
+    data.feedback.map((row) => `<tr><td>${row.feedback_id}</td><td>${row.session_id}</td><td>${row.rating}/5</td><td>${moderatorButton("delete-feedback", row.feedback_id, "delete")}</td></tr>`).join("")
+  }</tbody></table>`;
+  $("moderator-slot-skill").innerHTML = '<option value="">Skill</option>' +
+    data.skills.map((row) => `<option value="${row.skill_id}">${escapeHtml(row.name)}</option>`).join("");
+}
+
+async function loadModerator() {
+  const response = await api("/api/moderation");
+  if (response.ok) renderModerator(await response.json());
+}
+
+async function moderatorAction(action, id, status) {
+  if (action === "delete-user" || action === "delete-feedback") {
+    if (!window.confirm("Apply this destructive action?")) return;
+  }
+  const response = await api("/api/moderation", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action, [`${action === "delete-user" ? "user" : action === "delete-feedback" ? "feedback" : action === "request-status" ? "request" : action === "slot-status" ? "slot" : "session"}_id`]: Number(id), status})
+  });
+  const result = await response.json();
+  $("moderator-message").textContent = response.ok ? "Moderation change saved." : result.error;
+  if (response.ok) loadModerator();
 }
 
 // --- Auth ----------------------------------------------------------------
@@ -139,40 +181,6 @@ async function authenticate(path) {
 
 $("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
 $("register-button").addEventListener("click", () => authenticate("/api/register"));
-
-$("setup-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = $("setup-message");
-  try {
-    const response = await api("/api/admin/setup", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({code: $("setup-code").value})});
-    const result = await response.json();
-    $("setup-code").value = "";
-    if (!response.ok) { message.textContent = result.error; return; }
-    const me = await api("/api/me");
-    renderLearners(await me.json());
-  } catch (error) { $("setup-code").value = ""; message.textContent = "Could not reach the server."; }
-});
-
-$("admin-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = $("admin-message");
-  message.textContent = "Creating account...";
-  try {
-    const response = await api("/api/admin/users", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({name: $("admin-name").value, email: $("admin-email").value,
-        password: $("admin-password").value, role: $("admin-role").value})
-    });
-    const result = await response.json();
-    $("admin-password").value = "";
-    if (!response.ok) { message.textContent = result.error; return; }
-    $("admin-form").reset();
-    message.textContent = `Account created for ${result.email} (${result.role}).`;
-  } catch (error) {
-    $("admin-password").value = "";
-    message.textContent = "Could not reach the server. Please try again.";
-  }
-});
 
 // --- Requests & matches --------------------------------------------------
 
@@ -272,6 +280,48 @@ $("refresh").addEventListener("click", load);
 $("close-matches").addEventListener("click", () => $("match-drawer").hidden = true);
 $("load-requests").addEventListener("click", loadRequests);
 $("refresh-my-skills").addEventListener("click", loadMySkills);
+$("refresh-moderator").addEventListener("click", loadModerator);
+
+$("moderator-panel").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-mod-action]");
+  if (button) moderatorAction(button.dataset.modAction, button.dataset.id, button.dataset.status);
+});
+
+$("moderator-user-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await api("/api/moderation", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "set-role", user_id: Number($("moderator-user-id").value), role: $("moderator-user-role").value})
+  });
+  const result = await response.json();
+  $("moderator-user-message").textContent = response.ok ? "Role saved." : result.error;
+  if (response.ok) loadModerator();
+});
+
+$("moderator-skill-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await api("/api/moderation", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "create-skill", name: $("moderator-skill-name").value,
+      category: $("moderator-skill-category").value, description: $("moderator-skill-description").value})
+  });
+  const result = await response.json();
+  $("moderator-skill-message").textContent = response.ok ? "Skill created." : result.error;
+  if (response.ok) { event.target.reset(); loadModerator(); load(); }
+});
+
+$("moderator-slot-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await api("/api/moderation", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "create-slot", provider_id: Number($("moderator-slot-provider").value),
+      skill_id: Number($("moderator-slot-skill").value), start_time: $("moderator-slot-start").value,
+      end_time: $("moderator-slot-end").value})
+  });
+  const result = await response.json();
+  $("moderator-slot-message").textContent = response.ok ? "Slot created." : result.error;
+  if (response.ok) { event.target.reset(); loadModerator(); }
+});
 
 $("skill-form").addEventListener("submit", async (event) => {
   event.preventDefault();
