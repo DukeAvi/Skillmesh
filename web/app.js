@@ -58,6 +58,7 @@ function renderLearners(user) {
   renderProfile();
   $("login-panel").hidden = Boolean(currentUser);
   $("dashboard").hidden = !currentUser;
+  $("moderator-setup").hidden = Boolean(currentUser);
   $("logout-button").hidden = !currentUser;
   $("login-button").hidden = Boolean(currentUser);
   $("moderator-link").hidden = !currentUser || currentUser.role !== "admin";
@@ -98,6 +99,9 @@ function moderatorButton(action, id, label, status) {
 }
 
 function renderModerator(data) {
+  $("moderator-reports").innerHTML = `<table><thead><tr><th>REPORTED</th><th>REPORTER</th><th>REASON</th><th>DATE</th><th>ACTION</th></tr></thead><tbody>${
+    data.reports.map((row) => `<tr><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reporter_name || "Deleted user")}</td><td>${escapeHtml(row.reason)}</td><td>${new Date(row.created_at).toLocaleDateString()}</td><td>${moderatorButton(row.banned ? "unban-user" : "ban-user", row.reported_id, row.banned ? "unban" : "ban")}</td></tr>`).join("")
+  }</tbody></table>`;
   $("moderator-users").innerHTML = `<table><thead><tr><th>ID</th><th>NAME</th><th>ROLE</th><th>ACTION</th></tr></thead><tbody>${
     data.users.map((row) => `<tr><td>${row.user_id}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.role)}</td><td>${moderatorButton("delete-user", row.user_id, "delete")}</td></tr>`).join("")
   }</tbody></table>`;
@@ -123,13 +127,13 @@ async function loadModerator() {
 }
 
 async function moderatorAction(action, id, status) {
-  if (action === "delete-user" || action === "delete-feedback") {
+  if (action === "delete-user" || action === "delete-feedback" || action === "ban-user") {
     if (!window.confirm("Apply this destructive action?")) return;
   }
   const response = await api("/api/moderation", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action, [`${action === "delete-user" ? "user" : action === "delete-feedback" ? "feedback" : action === "request-status" ? "request" : action === "slot-status" ? "slot" : "session"}_id`]: Number(id), status})
+    body: JSON.stringify({action, [`${["delete-user", "ban-user", "unban-user"].includes(action) ? "user" : action === "delete-feedback" ? "feedback" : action === "request-status" ? "request" : action === "slot-status" ? "slot" : "session"}_id`]: Number(id), status})
   });
   const result = await response.json();
   $("moderator-message").textContent = response.ok ? "Moderation change saved." : result.error;
@@ -182,6 +186,17 @@ async function authenticate(path) {
 $("auth-form").addEventListener("submit", (event) => { event.preventDefault(); authenticate("/api/login"); });
 $("register-button").addEventListener("click", () => authenticate("/api/register"));
 
+$("moderator-setup-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("moderator-setup-message");
+  try {
+    const response = await api("/api/moderator/setup", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({code: $("moderator-setup-code").value, password: $("moderator-setup-password").value})});
+    const result = await response.json();
+    $("moderator-setup-form").reset();
+    message.textContent = response.ok ? "Moderator activated. Sign in as arjun@campus.edu." : result.error;
+  } catch (error) { $("moderator-setup-form").reset(); message.textContent = "Could not reach the server."; }
+});
+
 // --- Requests & matches --------------------------------------------------
 
 function renderRequests(rows) {
@@ -199,6 +214,7 @@ function renderRequests(rows) {
       <strong>${escapeHtml(row.skill_name)}</strong>
       <span>${row.requester_id === learnerId ? "to " + escapeHtml(row.provider_name) : "from " + escapeHtml(row.requester_name)}</span>
       <span>${escapeHtml(row.status)}</span><span>${new Date(row.created_at).toLocaleDateString()}</span>
+      <button type="button" class="report-abuse" data-user-id="${row.requester_id === learnerId ? row.provider_id : row.requester_id}">Report abuse</button>
     </div>`).join("");
 }
 
@@ -223,11 +239,24 @@ async function openMatches(skillId) {
       <h3>${escapeHtml(row.provider_name)}</h3>
       <p>Similarity ${(Number(row.similarity) * 100).toFixed(1)}%<br>Average rating ${row.rating}/5</p>
       <button class="request-button" data-provider="${row.provider_id}" data-similarity="${row.similarity}" type="button">send request</button>
+      <button class="report-abuse" data-user-id="${row.provider_id}" type="button">Report abuse</button>
     </article>`).join("") : '<div class="loading">No teacher matches found for this skill.</div>';
   document.querySelectorAll(".request-button").forEach((button) => {
     button.addEventListener("click", () => createRequest(button));
   });
 }
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest(".report-abuse");
+  if (!button) return;
+  const reason = window.prompt("Describe the abuse (up to 1000 characters):");
+  if (reason === null) return;
+  try {
+    const response = await api("/api/reports", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({user_id: Number(button.dataset.userId), reason})});
+    const result = await response.json();
+    window.alert(response.ok ? "Report sent to the moderator." : result.error);
+  } catch (error) { window.alert("Could not send the report. Please try again."); }
+});
 
 async function createRequest(button) {
   button.disabled = true;

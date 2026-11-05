@@ -202,23 +202,22 @@ Sessions expire after 24 hours or when the web server restarts. Existing databas
 volumes work without a reset. The standalone fallback is `python web/app.py`
 after installing `requirements-web.txt` and starting PostgreSQL.
 
-### Admin account creation
+### Moderator account setup
 
-An admin can sign in, open **Admin**, and create student, mentor, or admin
-accounts. The creator remains signed in. Share the initial password privately;
-the app does not yet offer password changes or resets.
+The seeded moderator account is `arjun@campus.edu`. Activate it before using
+the Moderator panel; ordinary users create their own accounts through sign-up.
+The app does not yet offer password changes or resets.
 
 For first-time setup, open the project's `.env` file in a text editor (create it
 if it does not exist) and add `SKILLMESH_SETUP_CODE=your-unique-random-code`.
 Choose a private random value of at least 16 characters. Recreate the web service
-so Compose picks it up: `docker compose up -d --build web`. Register and sign in,
-expand **Set up the first admin**, and enter the code. The Admin section then
-appears. Setup is disabled once an admin with a web password exists; seeded
-placeholder accounts do not count. Remove the code from `.env` and recreate the
-web service after setup. All account creation after this one-time configuration
-can be done in the GUI.
+so Compose picks it up: `docker compose up -d --build web`. On the sign-in page,
+open **Activate the moderator account**, enter the setup code and a new password,
+then sign in as `arjun@campus.edu`. Activation works only while the seeded
+placeholder password remains. Remove the code from `.env` and recreate the web
+service after setup.
 
-Admin permissions are checked against the database on each creation request.
+Moderator permissions are checked against the database on each request.
 Treat the setup code like a password and do setup only on a trusted network;
 HTTP does not encrypt it. Database access can also grant the admin role directly.
 
@@ -233,10 +232,7 @@ HTTP does not encrypt it. Database access can also grant the admin role directly
    The host can use `http://localhost:8080`.
 4. Run `./demo prepare` on the host to generate embeddings for seeded skills,
    then select a skill and inspect matches. Matching requires the learner to have
-   a matching `LEARN` registration; use `./demo add-user` with the same email to
-   add one to your account. The CLI preserves the existing account's password hash;
-   its password-hash prompt is ignored for an existing user. The web app does not
-   yet provide skill registration.
+   a matching `LEARN` registration; add it in the **My skills** section of the app.
 
 Allow inbound TCP port 8080 in the host firewall if needed. Some hotspots isolate
 clients, and WSL2 networking may require Windows port forwarding; test connectivity
@@ -397,6 +393,14 @@ skillmesh/
 ---
 
 ## 8. Troubleshooting
+
+### Abuse reports
+
+Signed-in users can report another person from a teacher match or an exchange
+request. The moderator can review reports in the Moderator panel and ban or
+unban the reported account. Banned users cannot sign in, and their existing
+sessions stop working. The web server creates the report and ban tables on
+startup, including for an existing database volume.
 
 | Symptom | Cause / fix |
 |---|---|

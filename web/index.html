@@ -47,6 +47,17 @@
         </form>
       </section>
 
+      <details id="moderator-setup" class="workspace-panel">
+        <summary>Activate the moderator account</summary>
+        <form id="moderator-setup-form" class="form-card">
+          <p>Set the initial password for arjun@campus.edu using the private setup code.</p>
+          <label>Setup code <input id="moderator-setup-code" type="password" required autocomplete="off"></label>
+          <label>New password <input id="moderator-setup-password" type="password" minlength="8" maxlength="256" required autocomplete="new-password"></label>
+          <button type="submit">Activate moderator</button>
+          <p id="moderator-setup-message" role="status"></p>
+        </form>
+      </details>
+
       <div id="dashboard" hidden>
       <nav class="dashboard-nav" aria-label="Dashboard sections">
         <a href="#discover">Discover</a>
@@ -85,6 +96,7 @@
           </form>
         </div>
         <div class="moderator-tables">
+          <article><h3>Abuse reports</h3><div id="moderator-reports" class="table-wrap"></div></article>
           <article><h3>Users</h3><div id="moderator-users" class="table-wrap"></div></article>
           <article><h3>Requests</h3><div id="moderator-requests" class="table-wrap"></div></article>
           <article><h3>Availability</h3><div id="moderator-slots" class="table-wrap"></div></article>

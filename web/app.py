@@ -95,18 +95,31 @@ def ensure_arjun_is_admin() -> None:
             cur.execute(
                 "UPDATE users SET role = 'student' "
                 "WHERE role = 'admin' "
-                "AND lower(name) NOT LIKE 'arjun%' "
                 "AND lower(email) <> 'arjun@campus.edu'"
             )
             cur.execute(
                 "UPDATE users SET role = 'admin' "
-                "WHERE lower(name) LIKE 'arjun%' OR lower(email) = 'arjun@campus.edu'"
+                "WHERE lower(email) = 'arjun@campus.edu'"
             )
 
 
+def ensure_moderation_tables() -> None:
+    with pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS banned_users (
+                user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+                banned_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+                banned_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS abuse_reports (
+                report_id BIGSERIAL PRIMARY KEY,
+                reporter_id BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+                reported_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1000),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+
+
 def is_moderator(user: dict | None) -> bool:
-    return bool(user and (str(user.get("name", "")).lower().startswith("arjun")
-                or str(user.get("email", "")).lower() == "arjun@campus.edu")
+    return bool(user and str(user.get("email", "")).lower() == "arjun@campus.edu"
                 and user.get("role") == "admin")
 
 
@@ -329,7 +342,13 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return None
         sess = _get_session(token)
-        return sess["user"] if sess else None
+        if not sess:
+            return None
+        rows = query("SELECT user_id, name, email, role FROM users WHERE user_id = %s AND NOT EXISTS (SELECT 1 FROM banned_users WHERE user_id = users.user_id)", (sess["user"]["user_id"],))
+        if not rows:
+            _destroy_session(token)
+            return None
+        return rows[0]
 
     def _require_csrf(self) -> bool:
         """Validate the CSRF token for mutating requests. Return True if OK."""
@@ -340,6 +359,9 @@ class Handler(BaseHTTPRequestHandler):
         sess = _get_session(token)
         if not sess:
             self.send_json({"error": "Session expired, please sign in again"}, 401)
+            return False
+        if not self.session():
+            self.send_json({"error": "Sign in required"}, 401)
             return False
         csrf_header = self.headers.get("X-CSRF-Token", "")
         if not csrf_header or not hmac.compare_digest(csrf_header, sess["csrf"]):
@@ -371,15 +393,10 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/me":
                     token = self._get_session_token()
                     sess = _get_session(token) if token else None
-                    if sess:
-                        roles = query("SELECT role FROM users WHERE user_id = %s", (sess["user"]["user_id"],))
-                        if not roles:
-                            _destroy_session(token)
-                            self.send_json(None)
-                            return
+                    current = self.session() if sess else None
+                    if current:
                         self.send_json({
-                            **sess["user"],
-                            "role": roles[0]["role"],
+                            **current,
                             "csrf_token": sess["csrf"],
                         })
                     else:
@@ -414,6 +431,13 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({"error": "Moderator access required"}, 403)
                         return
                     self.send_json({
+                            "reports": query("""SELECT r.report_id, r.reported_id, r.reason, r.created_at,
+                                target.name AS reported_name, reporter.name AS reporter_name,
+                                (b.user_id IS NOT NULL) AS banned
+                                FROM abuse_reports r JOIN users target ON target.user_id = r.reported_id
+                                LEFT JOIN users reporter ON reporter.user_id = r.reporter_id
+                                LEFT JOIN banned_users b ON b.user_id = r.reported_id
+                                ORDER BY r.created_at DESC"""),
                             "users": query(
                                 "SELECT user_id, name, email, role, created_at FROM users ORDER BY user_id"
                             ),
@@ -549,6 +573,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/logout",
             "/api/user-skills",
             "/api/moderation",
+            "/api/reports",
+            "/api/moderator/setup",
         ):
             self.send_json({"error": "endpoint not found"}, 404)
             return
@@ -564,6 +590,30 @@ class Handler(BaseHTTPRequestHandler):
 
             payload = self._read_json_body()
             if payload is None:
+                return
+
+            if path == "/api/moderator/setup":
+                if not _check_rate_limit("__moderator_setup__"):
+                    self.send_json({"error": "Too many setup attempts. Try again later."}, 429)
+                    return
+                configured = os.getenv("SKILLMESH_SETUP_CODE", "")
+                supplied = str(payload.get("code", ""))
+                if len(configured) < 16 or not hmac.compare_digest(configured.encode(), supplied.encode()):
+                    self.send_json({"error": "Invalid or unavailable setup code"}, 403)
+                    return
+                password = str(payload.get("password", ""))
+                error = _validate_password_strength(password)
+                if error:
+                    self.send_json({"error": error}, 400)
+                    return
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE users SET password_hash = %s WHERE lower(email) = %s AND password_hash = %s RETURNING user_id", (password_hash(password), "arjun@campus.edu", "placeholder-hash-arjun"))
+                        row = cur.fetchone()
+                if not row:
+                    self.send_json({"error": "Moderator account is already activated or missing"}, 409)
+                    return
+                self.send_json({"ok": True})
                 return
 
             # --- Login ---------------------------------------------------
@@ -586,12 +636,16 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 rows = query(
-                    "SELECT user_id, name, email, role, password_hash "
+                    "SELECT user_id, name, email, role, password_hash, "
+                    "EXISTS (SELECT 1 FROM banned_users WHERE user_id = users.user_id) AS banned "
                     "FROM users WHERE lower(email) = %s",
                     (email,),
                 )
                 if not rows or not verify_password(password, rows[0]["password_hash"]):
                     self.send_json({"error": "Invalid email or password"}, 401)
+                    return
+                if rows[0]["banned"]:
+                    self.send_json({"error": "This account has been banned"}, 403)
                     return
 
                 user = {
@@ -654,6 +708,22 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/reports":
+                if not self._require_csrf():
+                    return
+                user = self.session()
+                target = int(payload.get("user_id", 0))
+                reason = str(payload.get("reason", "")).strip()
+                if target == user["user_id"] or target <= 0 or not reason or len(reason) > 1000:
+                    raise ValueError("Choose another user and provide a reason (up to 1000 characters)")
+                with pg_connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("INSERT INTO abuse_reports (reporter_id, reported_id, reason) SELECT %s, user_id, %s FROM users WHERE user_id = %s RETURNING report_id", (user["user_id"], reason, target))
+                        if not cur.fetchone():
+                            raise ValueError("User not found")
+                self.send_json({"ok": True}, 201)
+                return
+
             if path == "/api/user-skills":
                 if not self._require_csrf():
                     return
@@ -704,6 +774,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/moderation":
+                if not self._require_csrf():
+                    return
                 user = self.session()
                 if not is_moderator(user):
                     self.send_json({"error": "Moderator access required"}, 403)
@@ -711,15 +783,23 @@ class Handler(BaseHTTPRequestHandler):
                 action = str(payload.get("action", ""))
                 with pg_connect() as conn:
                     with conn.cursor() as cur:
-                        if action == "set-role":
+                        if action in ("ban-user", "unban-user"):
+                            user_id = int(payload["user_id"])
+                            if user_id == user["user_id"]:
+                                raise ValueError("You cannot ban your own account")
+                            if action == "ban-user":
+                                cur.execute("INSERT INTO banned_users (user_id, banned_by) SELECT user_id, %s FROM users WHERE user_id = %s ON CONFLICT (user_id) DO NOTHING", (user["user_id"], user_id))
+                            else:
+                                cur.execute("DELETE FROM banned_users WHERE user_id = %s", (user_id,))
+                        elif action == "set-role":
                             user_id = int(payload["user_id"])
                             role = str(payload["role"])
                             if role not in ("student", "mentor", "admin"):
                                 raise ValueError("Invalid role")
-                            target = query("SELECT name FROM users WHERE user_id = %s", (user_id,))
+                            target = query("SELECT email FROM users WHERE user_id = %s", (user_id,))
                             if not target:
                                 raise ValueError("User not found")
-                            target_is_arjun = target[0]["name"].lower() == "arjun"
+                            target_is_arjun = target[0]["email"].lower() == "arjun@campus.edu"
                             if role == "admin" and not target_is_arjun:
                                 raise ValueError("Only Arjun can be an admin")
                             if target_is_arjun and role != "admin":
@@ -824,6 +904,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     port = int(os.getenv("SKILLMESH_WEB_PORT", "8080"))
+    ensure_moderation_tables()
     ensure_arjun_is_admin()
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"SkillMesh observatory listening on http://localhost:{port}")
