@@ -23,8 +23,13 @@ export async function api(path, options = {}) {
       "The server returned an unreadable response. Please try again.",
     );
   }
-  if (!response.ok)
-    throw new Error(data?.error || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(
+      data?.error || `Request failed (${response.status}).`,
+    );
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 

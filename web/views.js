@@ -18,23 +18,24 @@ function table(headers, body) {
 }
 
 export function renderSkills(rows) {
-  const max = Math.max(
-    ...rows.map((row) => Math.max(row.learners, row.teachers)),
-    1,
-  );
-  $("skill-list").innerHTML = rows
-    .map(
-      (row, index) => `
-    <button class="skill-row skill-button" data-skill-id="${row.skill_id}" type="button">
-      <span class="rank">${String(index + 1).padStart(2, "0")}</span>
+  $("catalogue-count").textContent =
+    `${rows.length} ${rows.length === 1 ? "skill" : "skills"}`;
+  $("skill-list").innerHTML = rows.length
+    ? rows
+        .map(
+          (row) => `
+    <button class="skill-button" data-skill-id="${row.skill_id}" type="button">
+      <span class="skill-category">${escapeHtml(row.category_name || "Other")}</span>
       <span class="skill-name">${escapeHtml(row.skill_name)}</span>
-      <span class="meta">T ${row.teachers}</span>
-      <span class="meta">L ${row.learners}</span>
-      <span class="bar"><i style="width:${Math.max(3, (row.learners / max) * 100)}%"></i></span>
-      <span class="gap ${row.demand_gap <= 0 ? "neutral" : ""}">gap ${row.demand_gap > 0 ? "+" : ""}${row.demand_gap}</span>
+      <span class="skill-meta">${number(row.teachers)} ${Number(row.teachers) === 1 ? "teacher" : "teachers"} · ${number(row.learners)} learning</span>
+      <span class="skill-cta">Find a teacher <span aria-hidden="true">↗</span></span>
     </button>`,
-    )
-    .join("");
+        )
+        .join("")
+    : '<p class="loading">No skills found. Try another skill or a category like Music.</p>';
+}
+
+export function renderTotals(rows) {
   $("open-demand").textContent = number(
     rows.reduce((sum, row) => sum + Number(row.learners), 0),
   );
@@ -49,10 +50,15 @@ export function renderSkills(rows) {
 
 export function renderLeaderboard(rows) {
   $("leaderboard").innerHTML =
-    `${table(["#", "NAME", "TAUGHT", "LEARNED", "TOTAL"], rows.map((row) => `<tr><td>${row.rank}</td><td>${escapeHtml(row.name)}</td><td>${row.sessions_taught}</td><td>${row.sessions_learned}</td><td>${row.total_sessions}</td></tr>`).join(""))}`;
+    `${table(["#", "Name", "Taught", "Learned", "Total"], rows.map((row) => `<tr><td>${row.rank}</td><td>${escapeHtml(row.name)}</td><td>${row.sessions_taught}</td><td>${row.sessions_learned}</td><td>${row.total_sessions}</td></tr>`).join(""))}`;
 }
 
 export function renderActivity(rows) {
+  if (!rows.length) {
+    $("activity").innerHTML =
+      '<p class="loading">No completed exchanges yet.</p>';
+    return;
+  }
   const max = Math.max(...rows.map((row) => Number(row.completed_sessions)), 1);
   $("activity").innerHTML = rows
     .map(
@@ -62,17 +68,12 @@ export function renderActivity(rows) {
     .join("");
 }
 
-export function renderProfile(currentUser) {
-  const name = currentUser?.name || "Sign in / sign up";
-  $("profile-avatar").textContent = name.charAt(0).toUpperCase() || "?";
+export function renderProfile(user) {
+  const name = user?.name || "Sign in";
+  $("profile-avatar").textContent = user ? name.charAt(0).toUpperCase() : "?";
   $("profile-name").textContent = name;
-  $("profile-label").textContent = currentUser ? "Signed in as" : "Account";
-  $("profile-email").textContent =
-    currentUser?.email || "Choose a profile to continue";
-  $("current-profile").textContent = currentUser
-    ? `Searching as ${name}`
-    : "Choose a profile above";
-  $("current-profile").classList.toggle("ready", Boolean(currentUser));
+  $("profile-label").textContent = user ? "Your account" : "Welcome";
+  $("profile-email").textContent = user?.email || "Sign in to get started";
 }
 
 export function populateSkillChoices(skills) {
@@ -93,17 +94,17 @@ function moderatorButton(action, id, label, status) {
 
 export function renderModerator(data) {
   $("moderator-reports").innerHTML =
-    `${table(["REPORTED", "REPORTER", "REASON", "DATE", "ACTION"], data.reports.map((row) => `<tr><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reporter_name || "Deleted user")}</td><td>${escapeHtml(row.reason)}</td><td>${new Date(row.created_at).toLocaleDateString()}</td><td>${moderatorButton(row.banned ? "unban-user" : "ban-user", row.reported_id, row.banned ? "unban" : "ban")}</td></tr>`).join(""))}`;
+    `${table(["Reported person", "Reported by", "Reason", "Date", "Action"], data.reports.map((row) => `<tr><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reporter_name || "Deleted user")}</td><td>${escapeHtml(row.reason)}</td><td>${new Date(row.created_at).toLocaleDateString()}</td><td>${moderatorButton(row.banned ? "unban-user" : "ban-user", row.reported_id, row.banned ? "unban" : "ban")}</td></tr>`).join(""))}`;
   $("moderator-users").innerHTML =
-    `${table(["ID", "NAME", "ROLE", "ACTION"], data.users.map((row) => `<tr><td>${row.user_id}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.role)}</td><td>${moderatorButton("delete-user", row.user_id, "delete")}</td></tr>`).join(""))}`;
+    `${table(["ID", "Name", "Role", "Action"], data.users.map((row) => `<tr><td>${row.user_id}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.role)}</td><td>${moderatorButton("delete-user", row.user_id, "delete")}</td></tr>`).join(""))}`;
   $("moderator-requests").innerHTML =
-    `${table(["ID", "SKILL", "STATUS", "ACTION"], data.requests.map((row) => `<tr><td>${row.request_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${moderatorButton("request-status", row.request_id, "accept", "accepted")}${moderatorButton("request-status", row.request_id, "reject", "rejected")}</td></tr>`).join(""))}`;
+    `${table(["ID", "Skill", "Status", "Action"], data.requests.map((row) => `<tr><td>${row.request_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${moderatorButton("request-status", row.request_id, "accept", "accepted")}${moderatorButton("request-status", row.request_id, "reject", "rejected")}</td></tr>`).join(""))}`;
   $("moderator-slots").innerHTML =
-    `${table(["ID", "PROVIDER", "WHEN", "STATUS", "ACTION"], data.slots.map((row) => `<tr><td>${row.slot_id}</td><td>${escapeHtml(row.provider_name)}</td><td>${new Date(row.start_time).toLocaleString()}</td><td>${row.status}</td><td>${row.status === "open" ? moderatorButton("slot-status", row.slot_id, "cancel", "cancelled") : ""}</td></tr>`).join(""))}`;
+    `${table(["ID", "Teacher", "When", "Status", "Action"], data.slots.map((row) => `<tr><td>${row.slot_id}</td><td>${escapeHtml(row.provider_name)}</td><td>${new Date(row.start_time).toLocaleString()}</td><td>${row.status}</td><td>${row.status === "open" ? moderatorButton("slot-status", row.slot_id, "cancel", "cancelled") : ""}</td></tr>`).join(""))}`;
   $("moderator-sessions").innerHTML =
-    `${table(["ID", "SKILL", "STATUS", "ACTION"], data.sessions.map((row) => `<tr><td>${row.session_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${row.status === "scheduled" ? moderatorButton("session-status", row.session_id, "complete", "completed") : ""}${row.status !== "cancelled" ? moderatorButton("session-status", row.session_id, "cancel", "cancelled") : ""}</td></tr>`).join(""))}`;
+    `${table(["ID", "Skill", "Status", "Action"], data.sessions.map((row) => `<tr><td>${row.session_id}</td><td>${escapeHtml(row.skill_name)}</td><td>${row.status}</td><td>${row.status === "scheduled" ? moderatorButton("session-status", row.session_id, "complete", "completed") : ""}${row.status !== "cancelled" ? moderatorButton("session-status", row.session_id, "cancel", "cancelled") : ""}</td></tr>`).join(""))}`;
   $("moderator-feedback").innerHTML =
-    `${table(["ID", "SESSION", "RATING", "ACTION"], data.feedback.map((row) => `<tr><td>${row.feedback_id}</td><td>${row.session_id}</td><td>${row.rating}/5</td><td>${moderatorButton("delete-feedback", row.feedback_id, "delete")}</td></tr>`).join(""))}`;
+    `${table(["ID", "Session", "Rating", "Action"], data.feedback.map((row) => `<tr><td>${row.feedback_id}</td><td>${row.session_id}</td><td>${row.rating}/5</td><td>${moderatorButton("delete-feedback", row.feedback_id, "delete")}</td></tr>`).join(""))}`;
   $("moderator-slot-skill").innerHTML =
     '<option value="">Skill</option>' +
     data.skills
@@ -114,29 +115,21 @@ export function renderModerator(data) {
       .join("");
 }
 
-export function renderRequests(rows, currentUser) {
-  if (!rows.length) {
-    $("requests").innerHTML =
-      '<div class="loading">No requests yet. Search for a skill to start an exchange.</div>';
-    return;
-  }
-  const learnerId = currentUser?.user_id;
-  if (!learnerId) {
-    $("requests").innerHTML =
-      '<div class="loading">Choose a profile above to see your requests.</div>';
-    return;
-  }
-  $("requests").innerHTML = rows
-    .map(
-      (row) => `
-    <div class="request-row">
-      <strong>${escapeHtml(row.skill_name)}</strong>
-      <span>${row.requester_id === learnerId ? "to " + escapeHtml(row.provider_name) : "from " + escapeHtml(row.requester_name)}</span>
-      <span>${escapeHtml(row.status)}</span><span>${new Date(row.created_at).toLocaleDateString()}</span>
-      <button type="button" class="report-abuse" data-user-id="${row.requester_id === learnerId ? row.provider_id : row.requester_id}">Report abuse</button>
-    </div>`,
-    )
-    .join("");
+export function renderRequests(rows, user) {
+  $("request-count").textContent = rows.length ? String(rows.length) : "";
+  $("requests").innerHTML = rows.length
+    ? rows
+        .map((row) => {
+          const outgoing = row.requester_id === user.user_id;
+          return `<article class="request-row">
+      <div><strong>${escapeHtml(row.skill_name)}</strong><small>${outgoing ? "Sent" : "Received"} ${new Date(row.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · Request #${row.request_id}</small></div>
+      <span class="request-person">${outgoing ? "To " + escapeHtml(row.provider_name) : "From " + escapeHtml(row.requester_name)}</span>
+      <span class="request-status">${escapeHtml(row.status)}</span>
+      <button type="button" class="report-abuse" data-user-id="${outgoing ? row.provider_id : row.requester_id}">Report abuse</button>
+    </article>`;
+        })
+        .join("")
+    : '<p class="loading">No requests yet. <a href="#discover">Find a skill</a> and send your first request.</p>';
 }
 
 export function renderMySkills(rows) {
@@ -145,12 +138,12 @@ export function renderMySkills(rows) {
         .map(
           (row) => `
     <article class="skill-card">
-      <div><strong>${escapeHtml(row.skill_name)}</strong><small>${escapeHtml(row.proficiency_level || "level not specified")}</small></div>
-      <span class="skill-type">${row.skill_type === "TEACH" ? "TEACHING" : "LEARNING"}</span>
+      <div><strong>${escapeHtml(row.skill_name)}</strong><small>${escapeHtml(row.proficiency_level || "Level not specified")}</small>${row.description ? `<p class="hint">${escapeHtml(row.description)}</p>` : ""}</div>
+      <span class="skill-type">${row.skill_type === "TEACH" ? "Teaching" : "Learning"}</span>
     </article>`,
         )
         .join("")
-    : '<div class="loading">Add a skill to start teaching or learning.</div>';
+    : '<p class="loading">Your skills belong here. Add something you can teach or want to learn.</p>';
 }
 
 export function renderMatches(rows) {
@@ -159,12 +152,18 @@ export function renderMatches(rows) {
         .map(
           (row) => `
     <article class="match-card">
+      <span class="avatar" aria-hidden="true">${escapeHtml(row.provider_name.charAt(0))}</span>
       <h3>${escapeHtml(row.provider_name)}</h3>
-      <p>Similarity ${(Number(row.similarity) * 100).toFixed(1)}%<br>Average rating ${row.rating}/5</p>
-      <button class="request-button" data-provider="${row.provider_id}" data-similarity="${row.similarity}" type="button">send request</button>
+      <p>Teaches ${escapeHtml(row.matched_skill)}<br>${Number(row.rating) ? `${Number(row.rating).toFixed(1)} / 5 learner rating` : "No learner ratings yet"}</p>
+      <button class="request-button" data-provider="${row.provider_id}" data-skill="${row.matched_skill_id}" data-similarity="${row.similarity}" type="button">Send request</button>
       <button class="report-abuse" data-user-id="${row.provider_id}" type="button">Report abuse</button>
     </article>`,
         )
         .join("")
-    : '<div class="loading">No teacher matches found for this skill.</div>';
+    : '<p class="loading">No teacher matches for this skill yet. Your interest is saved in <a href="#my-skills">My Skills</a>; try another skill while the campus grows.</p>';
+}
+
+export function renderLearningPrompt(skill) {
+  $("match-list").innerHTML =
+    `<div class="learning-prompt"><h3>Make room for ${escapeHtml(skill.skill_name)}.</h3><p>Add it to your learning skills to find teachers. You can add your goals and experience in My Skills.</p><button class="primary" data-start-learning="${skill.skill_id}" type="button">I want to learn ${escapeHtml(skill.skill_name)}</button></div>`;
 }
