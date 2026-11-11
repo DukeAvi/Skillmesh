@@ -53,7 +53,8 @@ INSERT INTO skills (category_id, name, description) VALUES
      'Dribbling, passing, basic man-to-man defence and shooting drills.');
 
 -- ---------------------------------------------------------------------------
--- 6 users (password_hash is a placeholder - there is no auth in this project)
+-- 6 users (placeholder hashes cannot authenticate; use web registration or
+-- moderator activation for browser sign-in)
 -- ---------------------------------------------------------------------------
 INSERT INTO users (name, email, password_hash, role, department, year_of_study, bio) VALUES
     ('Aarav Sharma',  'aarav.sharma@campus.edu',  'placeholder-hash-aarav',  'student', 'CSE',        3,

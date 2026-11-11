@@ -1,23 +1,8 @@
-"""Comprehensive end-to-end simulation for SkillMesh.
+"""Verify the exchange workflow with synthetic data across all three stores.
 
-Simulates the complete system including the updated profile management,
-search, and request workflows:
-  1. Record pre-simulation baseline metrics
-  2. Onboard simulated users and skills into PostgreSQL with 384-d semantic embeddings
-  3. User Profile management verification (/api/users with name, email, role, department)
-  4. Catalogue search & client filtering simulation (matching frontend app.js logic)
-  5. Inspect `skill_popularity` view (dynamic supply, demand, and demand gap)
-  6. Matchmaker endpoint verification (/api/matches with fn_provider_average_rating)
-  7. HTTP POST /api/requests workflow and validation handling (201, 400, 422)
-  8. Exchange log endpoint verification (/api/requests?user_id=...)
-  9. Pessimistic row locking concurrency race test (`SELECT ... FOR UPDATE`)
- 10. Procedure 2: `sp_complete_swap_session` execution and idempotency guard
- 11. Feedback submission & provider average rating computation (excluding self-reviews)
- 12. Live analytical views re-computation (`leaderboard` and `skill_popularity`)
- 13. Redis ephemeral presence lifecycle (heartbeats, TTL, renewal, disconnect)
- 14. Neo4j graph synchronization (TEACHES, WANTS, and derived MENTORS relationships)
- 15. Frontend Observatory API verification (/api/health, /api/users, /api/activity, etc.)
- 16. Teardown, graph cleanup, and baseline restoration verification
+Run a private HTTP server, sign in synthetic accounts, exercise matching and
+CSRF-protected requests, race a booking, complete a session, and check ratings,
+views, TTL presence, and graph relationships. Cleanup restores the baseline.
 """
 
 from __future__ import annotations
@@ -33,7 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:

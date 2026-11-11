@@ -97,13 +97,7 @@ def embed(text: str):
 
 
 def embedding_literal(vector):
-    """Render a vector as a pgvector literal, e.g. '[0.1,0.2,...]'.
-
-    Used by the psycopg3 adapter registered below; passing a Python list
-    directly also works because psycopg adapts list[float] to a numeric[] which
-    the vector type accepts via its input function. The literal keeps the SQL
-    portable and readable in logs.
-    """
+    """Render a vector as a SQL parameter literal accepted by pgvector."""
     return "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
 
 
