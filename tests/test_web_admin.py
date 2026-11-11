@@ -12,9 +12,9 @@ def setup_request(code, password="Example123", activated=False):
     handler.headers = {"Content-Length": str(len(body))}
     handler.rfile = io.BytesIO(body)
     handler.send_json = MagicMock()
-    with patch.dict(app.os.environ, {"SKILLMESH_SETUP_CODE": "a-private-code-123"}), \
-         patch.object(app, "_check_rate_limit", return_value=True), \
-         patch.object(app, "pg_connect") as connect:
+    with patch.dict(app.auth.os.environ, {"SKILLMESH_SETUP_CODE": "a-private-code-123"}), \
+         patch.object(app.auth, "_check_rate_limit", return_value=True), \
+         patch.object(app.auth, "pg_connect") as connect:
         cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = None if activated else (1,)
         handler.do_POST()

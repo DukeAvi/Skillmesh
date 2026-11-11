@@ -19,7 +19,7 @@ def handler_for(path, payload):
 
 def test_user_can_report_another_user():
     handler = handler_for("/api/reports", {"user_id": 2, "reason": "Harassment"})
-    with patch.object(app, "pg_connect") as connect:
+    with patch.object(app.moderation, "pg_connect") as connect:
         cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (7,)
         handler.do_POST()
@@ -43,7 +43,7 @@ def test_moderator_can_ban_and_unban():
     for action in ("ban-user", "unban-user"):
         handler = handler_for("/api/moderation", {"action": action, "user_id": 2})
         handler.session.return_value = {"user_id": 1, "email": "arjun@campus.edu", "role": "admin"}
-        with patch.object(app, "pg_connect") as connect:
+        with patch.object(app.moderation, "pg_connect") as connect:
             handler.do_POST()
         cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         assert cursor.execute.called
@@ -53,12 +53,12 @@ def test_moderator_can_ban_and_unban():
 def test_banned_user_session_is_destroyed():
     handler = object.__new__(app.Handler)
     handler._get_session_token = MagicMock(return_value="token")
-    with patch.object(app, "_get_session", return_value={"user": {"user_id": 2}}), \
+    with patch.object(app.auth, "_get_session", return_value={"user": {"user_id": 2}}), \
          patch.object(app, "query", return_value=[]), \
-         patch.object(app, "_destroy_session") as destroy:
+         patch.object(app.auth, "_destroy_session") as destroy:
         assert handler.session() is None
         destroy.assert_called_once_with("token")
 
 
 def test_name_does_not_grant_moderator_access():
-    assert not app.is_moderator({"name": "Arjun", "email": "other@example.com", "role": "admin"})
+    assert not app.moderation.is_moderator({"name": "Arjun", "email": "other@example.com", "role": "admin"})
