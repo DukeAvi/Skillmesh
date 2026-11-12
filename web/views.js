@@ -94,7 +94,7 @@ function moderatorButton(action, id, label, status) {
 
 export function renderModerator(data) {
   $("moderator-reports").innerHTML =
-    `${table(["Reported person", "Reported by", "Reason", "Date", "Action"], data.reports.map((row) => `<tr><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reporter_name || "Deleted user")}</td><td>${escapeHtml(row.reason)}</td><td>${new Date(row.created_at).toLocaleDateString()}</td><td>${moderatorButton(row.banned ? "unban-user" : "ban-user", row.reported_id, row.banned ? "unban" : "ban")}</td></tr>`).join(""))}`;
+    `${table(["Reported person", "Reported by", "Reason", "Date", "Action"], data.reports.map((row) => `<tr><td>${escapeHtml(row.reported_name)}</td><td>${escapeHtml(row.reporter_name || "Deleted user")}</td><td>${escapeHtml(row.reason)}<br><span>${escapeHtml(row.status)}</span></td><td>${new Date(row.created_at).toLocaleDateString()}</td><td>${moderatorButton(row.banned ? "unban-user" : "ban-user", row.reported_id, row.banned ? "unban" : "ban")}${row.status === "open" ? moderatorButton("report-status", row.report_id, "Review", "reviewed") : ""}</td></tr>`).join(""))}`;
   $("moderator-users").innerHTML =
     `${table(["ID", "Name", "Role", "Action"], data.users.map((row) => `<tr><td>${row.user_id}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.role)}</td><td>${moderatorButton("delete-user", row.user_id, "delete")}</td></tr>`).join(""))}`;
   $("moderator-requests").innerHTML =
@@ -166,4 +166,9 @@ export function renderMatches(rows) {
 export function renderLearningPrompt(skill) {
   $("match-list").innerHTML =
     `<div class="learning-prompt"><h3>Make room for ${escapeHtml(skill.skill_name)}.</h3><p>Add it to your learning skills to find teachers. You can add your goals and experience in My Skills.</p><button class="primary" data-start-learning="${skill.skill_id}" type="button">I want to learn ${escapeHtml(skill.skill_name)}</button></div>`;
+}
+
+export function renderReportPeople(rows) {
+  $("report-person").innerHTML = '<option value="">Choose a person</option>' + rows.map((row) =>
+    `<option value="${row.user_id}">${escapeHtml(row.name)}</option>`).join("");
 }

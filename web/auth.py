@@ -150,9 +150,7 @@ def login(payload):
         raise APIError("Too many login attempts. Try again in 15 minutes.", 429)
     rows = query(
         """
-            SELECT user_id, name, email, role, password_hash, EXISTS (SELECT 1
-            FROM banned_users
-            WHERE user_id = users.user_id) AS banned
+            SELECT user_id, name, email, role, password_hash, (banned_at IS NOT NULL) AS banned
             FROM users
             WHERE lower(email) = %s
         """,

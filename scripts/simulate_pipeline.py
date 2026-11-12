@@ -284,7 +284,7 @@ def _run_simulation(keep: bool = False) -> bool:
     samira_id = created_users[SIM_USERS[2]["email"]]
 
     step(2, "Verify signed-in profiles and deny public user listing")
-    assert http_call("/api/users")[0] == 404
+    assert http_call("/api/users")[0] == 401
     for email, user_id in created_users.items():
         sign_in(user_id, email)
         status, profile = http_call("/api/me", user_id=user_id)

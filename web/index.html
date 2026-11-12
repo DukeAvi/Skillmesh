@@ -274,7 +274,18 @@
             <div id="requests" class="requests" aria-live="polite">
               <div class="loading">Loading your requests…</div>
             </div>
-          </section>
+          <details id="community-report">
+  <summary>Report a campus member</summary>
+  <form id="community-report-form" class="form-card">
+    <label for="report-person">Person</label>
+    <select id="report-person" required><option value="">Choose a person</option></select>
+    <label for="report-reason">Reason</label>
+    <textarea id="report-reason" minlength="5" maxlength="1000" required></textarea>
+    <button type="submit">Send report</button>
+    <p id="community-report-message" class="form-message" role="status"></p>
+  </form>
+</details>
+</section>
 
           <section
             id="campus-activity"

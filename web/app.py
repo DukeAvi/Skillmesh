@@ -89,12 +89,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
         rows = query(
             """
-                SELECT user_id, name, email, role
-                FROM users
-                WHERE user_id = %s
-                AND NOT EXISTS (SELECT 1
-                FROM banned_users
-                WHERE user_id = users.user_id)
+                SELECT user_id, name, email, role FROM users
+                WHERE user_id = %s AND banned_at IS NULL
             """,
             (sess["user"]["user_id"],),
         )
@@ -148,7 +144,14 @@ class Handler(BaseHTTPRequestHandler):
                         {**user, "csrf_token": sess["csrf"]} if user else None
                     )
                 elif path == "/api/users":
-                    self.send_json({"error": "endpoint not found"}, 404)
+                    user = self.session()
+                    if not user:
+                        raise APIError("Sign in required", 401)
+                    self.send_json(query(
+                        "SELECT user_id, name, role, department, bio FROM users "
+                        "WHERE role <> 'admin' AND user_id <> %s AND banned_at IS NULL ORDER BY name",
+                        (user["user_id"],),
+                    ))
                 elif path == "/api/moderation":
                     if not moderation.is_moderator(self.session()):
                         raise APIError("Moderator access required", 403)

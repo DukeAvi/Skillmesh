@@ -44,6 +44,7 @@ def test_moderator_can_ban_and_unban():
         handler = handler_for("/api/moderation", {"action": action, "user_id": 2})
         handler.session.return_value = {"user_id": 1, "email": "arjun@campus.edu", "role": "admin"}
         with patch.object(app.moderation, "pg_connect") as connect:
+            connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.rowcount = 1
             handler.do_POST()
         cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         assert cursor.execute.called

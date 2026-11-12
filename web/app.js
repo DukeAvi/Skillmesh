@@ -12,6 +12,7 @@ import {
   renderMySkills,
   renderMatches,
   renderLearningPrompt,
+  renderReportPeople,
 } from "./views.js";
 
 let skills = [];
@@ -64,10 +65,12 @@ function setCurrentUser(user) {
     $("match-drawer").hidden = true;
     matchGeneration++;
   }
+  $("community-report").hidden = !user || user.role === "admin";
   showPage();
   if (user) {
     loadMySkills();
     loadRequests();
+    if (user.role !== "admin") api("/api/users").then(renderReportPeople).catch((error) => showError("community-report-message", error));
     if (user.role === "admin") loadModerator();
   }
 }
@@ -251,6 +254,7 @@ async function moderatorAction(action, id, status) {
     "delete-feedback": "feedback_id",
     "request-status": "request_id",
     "slot-status": "slot_id",
+    "report-status": "report_id",
     "session-status": "session_id",
   }[action];
   await post("/api/moderation", { action, [target]: Number(id), status });
@@ -419,7 +423,7 @@ document.addEventListener("click", (event) => {
   if (reason === null) return;
   runAction(button, async () => {
     await post("/api/reports", {
-      user_id: Number(button.dataset.userId),
+      reported_user_id: Number(button.dataset.userId),
       reason,
     });
     window.alert("Report sent to the moderator.");
@@ -427,3 +431,10 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("hashchange", () => showPage(true));
 load();
+
+on("community-report-form", "submit", async (event) => {
+  event.preventDefault();
+  await post("/api/reports", {reported_user_id: Number($("report-person").value), reason: $("report-reason").value});
+  event.target.reset();
+  message("community-report-message", "Report sent to the moderator.");
+});

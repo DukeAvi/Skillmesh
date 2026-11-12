@@ -2,6 +2,7 @@
 
 from scripts.config import pg_connect
 from web.db import query
+from web.errors import APIError
 
 
 def ensure_arjun_is_admin() -> None:
@@ -19,19 +20,56 @@ def ensure_arjun_is_admin() -> None:
             )
 
 
-def ensure_moderation_tables() -> None:
-    with pg_connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS banned_users (
-                user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-                banned_by BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
-                banned_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
-            cur.execute("""CREATE TABLE IF NOT EXISTS abuse_reports (
-                report_id BIGSERIAL PRIMARY KEY,
-                reporter_id BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
-                reported_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1000),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+def ensure_moderation_schema(cur) -> None:
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS abuse_reports (
+            report_id BIGSERIAL PRIMARY KEY,
+            reporter_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            reported_user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 5 AND 1000),
+            status TEXT NOT NULL DEFAULT 'open'
+                   CHECK (status IN ('open', 'reviewed', 'dismissed')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (reporter_id <> reported_user_id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'abuse_reports' AND column_name = 'reported_id'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'abuse_reports' AND column_name = 'reported_user_id'
+            ) THEN
+                ALTER TABLE abuse_reports RENAME COLUMN reported_id TO reported_user_id;
+            END IF;
+        END
+        $$;
+        """
+    )
+    cur.execute(
+        "ALTER TABLE abuse_reports ADD COLUMN IF NOT EXISTS status TEXT "
+        "NOT NULL DEFAULT 'open'"
+    )
+
+
+
+def ensure_moderation_tables():
+    with pg_connect() as conn, conn.transaction(), conn.cursor() as cur:
+        ensure_moderation_schema(cur)
+        cur.execute("""DO $$ BEGIN
+            IF to_regclass('public.banned_users') IS NOT NULL THEN
+                UPDATE users u SET banned_at = b.banned_at FROM banned_users b
+                WHERE u.user_id = b.user_id AND u.banned_at IS NULL;
+                ALTER TABLE banned_users RENAME TO banned_users_legacy;
+            END IF;
+        END $$""")
 
 
 def is_moderator(user: dict | None) -> bool:
@@ -45,12 +83,11 @@ def is_moderator(user: dict | None) -> bool:
 def overview():
     return {
         "reports": query("""
-            SELECT r.report_id, r.reported_id, r.reason, r.created_at,
+            SELECT r.report_id, r.reported_user_id AS reported_id, r.reported_user_id, r.reason, r.status, r.created_at,
                             target.name AS reported_name, reporter.name AS reporter_name,
-                            (b.user_id IS NOT NULL) AS banned
-                            FROM abuse_reports r JOIN users target ON target.user_id = r.reported_id
+                            (target.banned_at IS NOT NULL) AS banned, target.banned_at
+                            FROM abuse_reports r JOIN users target ON target.user_id = r.reported_user_id
                             LEFT JOIN users reporter ON reporter.user_id = r.reporter_id
-                            LEFT JOIN banned_users b ON b.user_id = r.reported_id
                             ORDER BY r.created_at DESC
         """),
         "users": query(
@@ -104,19 +141,21 @@ def overview():
 
 
 def report_user(user, payload):
-    target = int(payload.get("user_id", 0))
+    if user.get("role") == "admin":
+        raise APIError("Only non-admin users can submit reports", 403)
+    target = int(payload.get("reported_user_id", payload.get("user_id", 0)))
     reason = str(payload.get("reason", "")).strip()
-    if target == user["user_id"] or target <= 0 or (not reason) or (len(reason) > 1000):
+    if target == user["user_id"] or target <= 0 or (len(reason) < 5) or (len(reason) > 1000):
         raise ValueError(
-            "Choose another user and provide a reason (up to 1000 characters)"
+            "Choose another user and provide a reason (5–1000 characters)"
         )
     with pg_connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                    INSERT INTO abuse_reports (reporter_id, reported_id, reason) SELECT %s, user_id, %s
+                    INSERT INTO abuse_reports (reporter_id, reported_user_id, reason) SELECT %s, user_id, %s
                     FROM users
-                    WHERE user_id = %s
+                    WHERE user_id = %s AND role <> 'admin' AND banned_at IS NULL
                     RETURNING report_id
                 """,
                 (user["user_id"], reason, target),
@@ -134,20 +173,19 @@ def moderate(user, payload):
                 user_id = int(payload["user_id"])
                 if user_id == user["user_id"]:
                     raise ValueError("You cannot ban your own account")
-                if action == "ban-user":
-                    cur.execute(
-                        """
-                            INSERT INTO banned_users (user_id, banned_by) SELECT user_id, %s
-                            FROM users
-                            WHERE user_id = %s
-                            ON CONFLICT (user_id) DO NOTHING
-                        """,
-                        (user["user_id"], user_id),
-                    )
-                else:
-                    cur.execute(
-                        "DELETE FROM banned_users WHERE user_id = %s", (user_id,)
-                    )
+                cur.execute(
+                    "UPDATE users SET banned_at = CASE WHEN %s THEN NOW() ELSE NULL END "
+                    "WHERE user_id = %s AND role <> 'admin'",
+                    (action == "ban-user", user_id),
+                )
+                if cur.rowcount != 1:
+                    raise ValueError("Only non-admin users can be banned")
+            elif action == "report-status":
+                status = str(payload["status"])
+                if status not in ("open", "reviewed", "dismissed"):
+                    raise ValueError("Invalid report status")
+                cur.execute("UPDATE abuse_reports SET status = %s WHERE report_id = %s",
+                            (status, int(payload["report_id"])))
             elif action == "set-role":
                 user_id = int(payload["user_id"])
                 role = str(payload["role"])
