@@ -72,7 +72,7 @@ def heartbeat_many(client, user_ids, ttl=PRESENCE_TTL):
 
 
 def online_users(client):
-    """Everyone currently online (used by the campus 'who is online' board)."""
+    """List heartbeat keys as sorted user IDs; the browser does not use this roster."""
     keys = list(client.scan_iter(match="online:*", count=200))
     return sorted(int(key.split(":", 1)[1]) for key in keys)
 

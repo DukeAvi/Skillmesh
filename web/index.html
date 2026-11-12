@@ -1,198 +1,473 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SkillMesh / Observatory</title>
-    <link rel="stylesheet" href="/styles.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#285b45" />
+    <title>SkillMesh · Campus skill exchange</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="shell">
       <header class="masthead">
-        <div>
-          <p class="eyebrow">SKILLMESH</p>
-          <h1>Learn something. <em>Teach something.</em></h1>
-          <p class="lede">Find people on campus who can help you learn, and share the skills you know.</p>
-        </div>
+        <a class="brand" href="#discover"
+          ><span class="brand-mark" aria-hidden="true">✳</span>SkillMesh<span
+            class="brand-caption"
+            >Campus skill exchange</span
+          ></a
+        >
         <div class="header-actions">
-          <div class="status"><span id="status-dot"></span><span id="status-text">connecting</span></div>
-          <button id="profile-button" class="profile-button" type="button" aria-expanded="false">
+          <button
+            id="profile-button"
+            class="profile-button"
+            type="button"
+            aria-expanded="false"
+            aria-controls="profile-menu"
+          >
             <span id="profile-avatar" class="avatar">?</span>
-            <span><small id="profile-label">Account</small><strong id="profile-name">Sign in / sign up</strong></span>
-            <span class="chevron">⌄</span>
+            <span
+              ><small id="profile-label">Your account</small
+              ><strong id="profile-name">Sign in</strong></span
+            >
+            <span aria-hidden="true">⌄</span>
           </button>
           <div id="profile-menu" class="profile-menu" hidden>
-            <p class="menu-label">Your profile</p>
-            <p id="profile-email" class="profile-email">Choose a profile to continue</p>
-            <button id="login-button" type="button">Sign in / create account</button>
-            <button id="logout-button" class="quiet-button" type="button">Sign out</button>
+            <p class="menu-label">Your account</p>
+            <p id="profile-email" class="profile-email">
+              Sign in to get started
+            </p>
+            <button id="login-button" type="button">
+              Sign in / create account
+            </button>
+            <button
+              id="logout-button"
+              class="quiet-button"
+              type="button"
+              hidden
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </header>
-
-      <section id="login-panel" class="login-panel auth-screen">
-        <div>
-          <p class="eyebrow">WELCOME TO SKILLMESH</p>
-          <h2>Build your learning network.</h2>
-          <p class="lede">Sign in to find people who can help you learn, share what you know, and keep every exchange in one place.</p>
-          <p class="pw-rules">Password: at least 8 characters, with uppercase, lowercase, and a digit.</p>
-        </div>
-        <form id="auth-form" class="login-options">
-          <input id="auth-name" placeholder="Name (for new accounts)" autocomplete="name">
-          <input id="auth-email" type="email" placeholder="Email" autocomplete="email" required>
-          <input id="auth-password" type="password" placeholder="Password (at least 8 characters)" minlength="8" autocomplete="current-password" required>
-          <button type="submit">Sign in</button>
-          <button id="register-button" type="button">Create account</button>
-          <p id="auth-error" role="alert"></p>
-        </form>
-      </section>
-
-      <div id="dashboard" hidden>
-      <nav class="dashboard-nav" aria-label="Dashboard sections">
-        <a href="#discover">Discover</a>
-        <a href="#my-skills">My skills</a>
-        <a href="#requests-section">Requests</a>
-        <a href="#leaderboard-section">Leaderboard</a>
-        <a id="moderator-link" href="#moderator-panel" hidden>Moderator</a>
-      </nav>
-      <section id="moderator-panel" class="workspace-panel moderator-panel" hidden>
-        <div class="section-head">
-          <div><p class="eyebrow">ARJUN / MODERATOR</p><h2>Manage the exchange</h2></div>
-          <button id="refresh-moderator" type="button">refresh data</button>
-        </div>
-        <p class="lede">Manage users, catalogue skills, requests, availability, sessions, and feedback.</p>
-        <div class="moderator-grid">
-          <form id="moderator-user-form" class="form-card">
-            <h3>Change user role</h3>
-            <input id="moderator-user-id" type="number" placeholder="User ID" required>
-            <select id="moderator-user-role"><option>student</option><option>mentor</option><option>admin</option></select>
-            <button type="submit">Save role</button><p id="moderator-user-message" class="form-message"></p>
-          </form>
-          <form id="moderator-skill-form" class="form-card">
-            <h3>Add catalogue skill</h3>
-            <input id="moderator-skill-name" placeholder="Skill name" required>
-            <input id="moderator-skill-category" placeholder="Category" required>
-            <textarea id="moderator-skill-description" placeholder="Description"></textarea>
-            <button type="submit">Create skill</button><p id="moderator-skill-message" class="form-message"></p>
-          </form>
-          <form id="moderator-slot-form" class="form-card">
-            <h3>Create availability slot</h3>
-            <input id="moderator-slot-provider" type="number" placeholder="Provider user ID" required>
-            <select id="moderator-slot-skill" required><option value="">Skill</option></select>
-            <label>Starts <input id="moderator-slot-start" type="datetime-local" required></label>
-            <label>Ends <input id="moderator-slot-end" type="datetime-local" required></label>
-            <button type="submit">Create open slot</button><p id="moderator-slot-message" class="form-message"></p>
-          </form>
-        </div>
-        <div class="moderator-tables">
-          <article><h3>Users</h3><div id="moderator-users" class="table-wrap"></div></article>
-          <article><h3>Requests</h3><div id="moderator-requests" class="table-wrap"></div></article>
-          <article><h3>Availability</h3><div id="moderator-slots" class="table-wrap"></div></article>
-          <article><h3>Sessions</h3><div id="moderator-sessions" class="table-wrap"></div></article>
-          <article><h3>Feedback</h3><div id="moderator-feedback" class="table-wrap"></div></article>
-          <article><h3>Abuse reports</h3><div id="moderator-reports" class="table-wrap"></div></article>
-        </div>
-        <p id="moderator-message" class="form-message" role="status"></p>
-      </section>
-      <section id="my-skills" class="workspace-panel">
-        <div class="section-head">
-          <div><p class="eyebrow">YOUR CONTRIBUTION</p><h2>Teach or learn a skill</h2></div>
-          <button id="refresh-my-skills" type="button">refresh</button>
-        </div>
-        <div class="workspace-grid">
-          <form id="skill-form" class="form-card">
-            <label>Skill
-              <select id="skill-choice" required><option value="">Choose a skill</option></select>
-            </label>
-            <label>I want to
-              <select id="skill-type" required>
-                <option value="TEACH">Teach this skill</option>
-                <option value="LEARN">Learn this skill</option>
-              </select>
-            </label>
-            <label>Level
-              <select id="skill-level">
-                <option value="">Not specified</option>
-                <option>beginner</option><option>intermediate</option><option>advanced</option>
-              </select>
-            </label>
-            <label>Description
-              <textarea id="skill-description" maxlength="500" placeholder="What would you like to share or learn?"></textarea>
-            </label>
-            <button type="submit">Add to my profile</button>
-            <p id="skill-form-message" class="form-message" role="status"></p>
-          </form>
-          <div id="my-skills-list" class="skill-cards"><div class="loading">loading your skills...</div></div>
-        </div>
-      </section>
-      <section class="signal-grid" aria-label="Summary">
-        <div class="signal signal-hot"><span>OPEN DEMAND</span><strong id="open-demand">—</strong><small>learner registrations</small></div>
-        <div class="signal"><span>TEACHING SUPPLY</span><strong id="teaching-supply">—</strong><small>teacher registrations</small></div>
-        <div class="signal"><span>EXCHANGES COMPLETE</span><strong id="exchanges">—</strong><small>sessions in the ledger</small></div>
-        <div class="signal"><span>VISIBLE SKILLS</span><strong id="skill-count">—</strong><small>catalogue coverage</small></div>
-      </section>
-
-      <section id="discover" class="observatory">
-        <div class="section-head">
-          <div><p class="eyebrow">01 / DEMAND FIELD</p><h2>Where learners are waiting</h2></div>
-          <button id="refresh" type="button">↻ refresh readout</button>
-        </div>
-        <div class="field-layout">
-          <div>
-            <div class="search-line">
-              <input id="skill-search" type="search" placeholder="Search the skill catalogue..." aria-label="Search skills">
-              <span id="current-profile" class="current-profile">Choose a profile above</span>
-            </div>
-            <div id="skill-list" class="skill-list"><div class="loading">scanning the catalogue...</div></div>
+      <main id="main-content" tabindex="-1">
+        <section id="login-panel" class="login-panel">
+          <div class="welcome-copy">
+            <p class="eyebrow">Learn from your campus.</p>
+            <h1>Someone on campus<br />knows how.</h1>
+            <p class="lede">
+              Learn guitar from a classmate. Get a hand with Python. Share
+              something you’re good at in return.
+            </p>
           </div>
-          <aside class="annotation">
-            <p class="eyebrow">READ THE GAP</p>
-            <div class="legend"><i class="legend-bar positive"></i><span>more learners than teachers</span></div>
-            <div class="legend"><i class="legend-bar balanced"></i><span>balanced exchange</span></div>
-            <p class="annotation-copy">The gap is calculated from distinct registrations, not session volume. A positive value is a useful signal for recruiting mentors.</p>
-          </aside>
+          <form id="auth-form" class="login-options">
+            <h2>Come on in.</h2>
+            <label for="auth-email">Campus email</label>
+            <input
+              id="auth-email"
+              type="email"
+              autocomplete="email"
+              required
+              placeholder="you@campus.edu"
+            />
+            <label for="auth-password">Password</label>
+            <input
+              id="auth-password"
+              type="password"
+              minlength="8"
+              maxlength="256"
+              autocomplete="current-password"
+              required
+              aria-describedby="password-help"
+            />
+            <p id="password-help" class="hint">
+              8–256 characters, with an uppercase letter, a lowercase letter,
+              and a number.
+            </p>
+            <button class="primary" type="submit">Sign in</button>
+            <div class="signup-fields">
+              <label for="auth-name"
+                >New here? Add your name to create an account.</label
+              >
+              <input
+                id="auth-name"
+                autocomplete="name"
+                maxlength="100"
+                placeholder="Your name"
+              />
+            </div>
+            <button id="register-button" type="button">Create account</button>
+            <p id="auth-error" role="alert"></p>
+          </form>
+        </section>
+        <details id="moderator-setup" class="setup-panel">
+          <summary>Moderator account setup</summary>
+          <form id="moderator-setup-form" class="form-card">
+            <p>
+              Activate arjun@campus.edu with the setup code from your local
+              configuration.
+            </p>
+            <label
+              >Setup code<input
+                id="moderator-setup-code"
+                type="password"
+                required
+                autocomplete="off"
+            /></label>
+            <label
+              >New password<input
+                id="moderator-setup-password"
+                type="password"
+                minlength="8"
+                maxlength="256"
+                required
+                autocomplete="new-password"
+            /></label>
+            <button type="submit">Activate moderator</button>
+            <p id="moderator-setup-message" role="status"></p>
+          </form>
+        </details>
+        <div id="dashboard" hidden>
+          <nav class="dashboard-nav" aria-label="Main navigation">
+            <a href="#discover">Discover</a>
+            <a href="#my-skills">My Skills</a>
+            <a href="#requests-section"
+              >Requests <span id="request-count"></span
+            ></a>
+            <a href="#campus-activity">Campus activity</a>
+            <a id="moderator-link" href="#moderator-panel" hidden>Moderation</a>
+          </nav>
+          <section id="discover" class="discovery" data-page-panel>
+            <div class="section-head discovery-heading">
+              <div>
+                <h1>What do you want to learn?</h1>
+                <p class="lede">
+                  Find your next skill. There’s someone here who can help.
+                </p>
+              </div>
+              <button id="refresh" type="button" class="quiet-button">
+                Refresh
+              </button>
+            </div>
+            <div class="search-line">
+              <label for="skill-search">Search skills</label>
+              <div class="search-control">
+                <span aria-hidden="true">⌕</span
+                ><input
+                  id="skill-search"
+                  type="search"
+                  placeholder="Try “Guitar” or “Programming”"
+                  autocomplete="off"
+                />
+              </div>
+              <p id="catalogue-message" class="hint" role="status"></p>
+            </div>
+            <div class="catalogue-head">
+              <h2>Explore the campus</h2>
+              <span id="catalogue-count" class="hint"></span>
+            </div>
+            <div id="skill-list" class="skill-list" aria-live="polite">
+              <p class="loading">Loading skills…</p>
+            </div>
+            <section
+              id="match-drawer"
+              class="match-drawer"
+              aria-labelledby="match-title"
+              hidden
+            >
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Make a connection</p>
+                  <h2 id="match-title" tabindex="-1">
+                    Teachers for this skill
+                  </h2>
+                </div>
+                <button id="close-matches" type="button" class="quiet-button">
+                  Close
+                </button>
+              </div>
+              <p id="match-help" class="hint">
+                Choose a teacher to send a request.
+              </p>
+              <p id="match-message" role="status" class="form-message"></p>
+              <div id="match-list" class="match-list" aria-live="polite"></div>
+            </section>
+          </section>
+          <section
+            id="my-skills"
+            class="workspace-panel"
+            data-page-panel
+            hidden
+          >
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">My skills</p>
+                <h1>What can you share?</h1>
+              </div>
+              <button id="refresh-my-skills" type="button">Refresh</button>
+            </div>
+            <p class="lede">
+              Add something you can teach, or something you’d like to learn. You
+              can update it here anytime.
+            </p>
+            <div class="workspace-grid">
+              <form id="skill-form" class="form-card">
+                <label
+                  >Skill
+                  <select id="skill-choice" required>
+                    <option value="">Choose a skill</option>
+                  </select>
+                </label>
+                <label
+                  >I want to
+                  <select id="skill-type" required>
+                    <option value="TEACH">Teach this skill</option>
+                    <option value="LEARN">Learn this skill</option>
+                  </select>
+                </label>
+                <label
+                  >Level
+                  <select id="skill-level">
+                    <option value="">Not specified</option>
+                    <option>beginner</option>
+                    <option>intermediate</option>
+                    <option>advanced</option>
+                  </select>
+                </label>
+                <label
+                  >Description
+                  <textarea
+                    id="skill-description"
+                    maxlength="500"
+                    placeholder="What would you like to share or learn?"
+                  ></textarea>
+                </label>
+                <button type="submit">Save skill</button>
+                <p
+                  id="skill-form-message"
+                  class="form-message"
+                  role="status"
+                ></p>
+              </form>
+              <div id="my-skills-list" class="skill-cards" aria-live="polite">
+                <div class="loading">Loading your skills…</div>
+              </div>
+            </div>
+          </section>
+          <section
+            id="requests-section"
+            class="requests-panel"
+            data-page-panel
+            hidden
+          >
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Requests</p>
+                <h1>Your next exchange</h1>
+              </div>
+              <button id="load-requests" type="button">Refresh</button>
+            </div>
+            <p class="lede">
+              Follow the requests you’ve sent and the ones you’ve received.
+            </p>
+            <div id="requests" class="requests" aria-live="polite">
+              <div class="loading">Loading your requests…</div>
+            </div>
+          <details id="community-report">
+  <summary>Report a campus member</summary>
+  <form id="community-report-form" class="form-card">
+    <label for="report-person">Person</label>
+    <select id="report-person" required><option value="">Choose a person</option></select>
+    <label for="report-reason">Reason</label>
+    <textarea id="report-reason" minlength="5" maxlength="1000" required></textarea>
+    <button type="submit">Send report</button>
+    <p id="community-report-message" class="form-message" role="status"></p>
+  </form>
+</details>
+</section>
+
+          <section
+            id="campus-activity"
+            class="workspace-panel"
+            data-page-panel
+            hidden
+          >
+            <p class="eyebrow">Campus activity</p>
+            <h1>Learning adds up.</h1>
+            <p class="lede">A look at what we’re sharing across campus.</p>
+            <section class="signal-grid" aria-label="Summary">
+              <div class="signal signal-hot">
+                <span>Learning registrations</span
+                ><strong id="open-demand">—</strong>
+              </div>
+              <div class="signal">
+                <span>Teaching registrations</span
+                ><strong id="teaching-supply">—</strong>
+              </div>
+              <div class="signal">
+                <span>Completed exchanges</span
+                ><strong id="exchanges">—</strong>
+              </div>
+              <div class="signal">
+                <span>Skills to explore</span
+                ><strong id="skill-count">—</strong>
+              </div>
+            </section>
+
+            <section class="lower-grid">
+              <article class="panel">
+                <h2>Most active people</h2>
+                <div id="leaderboard" class="table-wrap">
+                  <div class="loading">Loading people…</div>
+                </div>
+              </article>
+              <article class="panel">
+                <h2>Completed exchanges</h2>
+                <div id="activity" class="activity">
+                  <div class="loading">Loading exchanges…</div>
+                </div>
+              </article>
+            </section>
+          </section>
+          <section
+            id="moderator-panel"
+            class="workspace-panel moderator-panel"
+            data-page-panel
+            hidden
+          >
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Moderation</p>
+                <h1>Manage the exchange</h1>
+              </div>
+              <button id="refresh-moderator" type="button">Refresh</button>
+            </div>
+
+            <div class="moderator-grid">
+              <form id="moderator-user-form" class="form-card">
+                <h2>Change user role</h2>
+                <label for="moderator-user-id">User ID</label
+                ><input
+                  id="moderator-user-id"
+                  type="number"
+                  placeholder="User ID"
+                  required
+                />
+                <label for="moderator-user-role">Role</label
+                ><select id="moderator-user-role">
+                  <option>student</option>
+                  <option>mentor</option>
+                  <option>admin</option>
+                </select>
+                <button type="submit">Save role</button>
+                <p
+                  id="moderator-user-message"
+                  class="form-message"
+                  role="status"
+                ></p>
+              </form>
+              <form id="moderator-skill-form" class="form-card">
+                <h2>Add catalogue skill</h2>
+                <label for="moderator-skill-name">Skill name</label
+                ><input
+                  id="moderator-skill-name"
+                  placeholder="Skill name"
+                  required
+                />
+                <label for="moderator-skill-category">Category</label
+                ><input
+                  id="moderator-skill-category"
+                  placeholder="Category"
+                  required
+                />
+                <label for="moderator-skill-description">Description</label
+                ><textarea
+                  id="moderator-skill-description"
+                  placeholder="Description"
+                ></textarea>
+                <button type="submit">Create skill</button>
+                <p
+                  id="moderator-skill-message"
+                  class="form-message"
+                  role="status"
+                ></p>
+              </form>
+              <form id="moderator-slot-form" class="form-card">
+                <h2>Create availability slot</h2>
+                <label for="moderator-slot-provider">Provider user ID</label
+                ><input
+                  id="moderator-slot-provider"
+                  type="number"
+                  placeholder="Provider user ID"
+                  required
+                />
+                <label for="moderator-slot-skill">Skill</label
+                ><select id="moderator-slot-skill" required>
+                  <option value="">Skill</option>
+                </select>
+                <label
+                  >Starts
+                  <input
+                    id="moderator-slot-start"
+                    type="datetime-local"
+                    required
+                /></label>
+                <label
+                  >Ends
+                  <input id="moderator-slot-end" type="datetime-local" required
+                /></label>
+                <button type="submit">Create open slot</button>
+                <p
+                  id="moderator-slot-message"
+                  class="form-message"
+                  role="status"
+                ></p>
+              </form>
+            </div>
+            <div class="moderator-tables">
+              <article>
+                <h2>Abuse reports</h2>
+                <div id="moderator-reports" class="table-wrap"></div>
+              </article>
+              <article>
+                <h2>Users</h2>
+                <div id="moderator-users" class="table-wrap"></div>
+              </article>
+              <article>
+                <h2>Requests</h2>
+                <div id="moderator-requests" class="table-wrap"></div>
+              </article>
+              <article>
+                <h2>Availability</h2>
+                <div id="moderator-slots" class="table-wrap"></div>
+              </article>
+              <article>
+                <h2>Sessions</h2>
+                <div id="moderator-sessions" class="table-wrap"></div>
+              </article>
+              <article>
+                <h2>Feedback</h2>
+                <div id="moderator-feedback" class="table-wrap"></div>
+              </article>
+            </div>
+            <p id="moderator-message" class="form-message" role="status"></p>
+          </section>
         </div>
-      </section>
-
-      <section id="community" class="workspace-panel">
-        <div class="section-head">
-          <div><p class="eyebrow">COMMUNITY</p><h2>People on SkillMesh</h2></div>
-          <button id="refresh-community" type="button">refresh people</button>
-        </div>
-        <div id="community-list" class="user-cards"><div class="loading">loading people...</div></div>
-      </section>
-
-      <section id="match-drawer" class="match-drawer" hidden>
-        <div class="section-head">
-          <div><p class="eyebrow">04 / MATCHMAKER</p><h2 id="match-title">Teachers for this skill</h2></div>
-          <button id="close-matches" type="button">close</button>
-        </div>
-        <p id="match-help" class="lede">Choose a teacher below to send a request.</p>
-        <div id="match-list" class="match-list"></div>
-      </section>
-
-      <section id="leaderboard-section" class="lower-grid">
-        <article class="panel">
-          <p class="eyebrow">02 / EXCHANGE LEAGUE</p><h2>Most active people</h2>
-          <div id="leaderboard" class="table-wrap"><div class="loading">loading ranks...</div></div>
-        </article>
-        <article class="panel">
-          <p class="eyebrow">03 / COMPLETION TRACE</p><h2>Completed exchanges</h2>
-          <div id="activity" class="activity"><div class="loading">loading sessions...</div></div>
-        </article>
-      </section>
-
-      <section id="requests-section" class="requests-panel">
-        <div class="section-head">
-          <div><p class="eyebrow">05 / YOUR EXCHANGE LOG</p><h2>Requests</h2></div>
-          <button id="load-requests" type="button">refresh requests</button>
-        </div>
-        <div id="requests" class="requests"><div class="loading">choose a profile to see requests...</div></div>
-      </section>
-
-      <footer><span>POSTGRESQL / ANALYTICAL READ MODEL</span><span id="server-time">—</span></footer>
-      </div>
-    </main>
-    <script src="/app.js"></script>
+      </main>
+      <footer>
+        <span
+          >SkillMesh
+          <span class="footer-note"
+            >· Made for sharing what you know.</span
+          ></span
+        ><span class="status" role="status"
+          ><span id="status-dot" aria-hidden="true"></span
+          ><span id="status-text">Connecting…</span
+          ><span id="server-time" hidden></span
+        ></span>
+      </footer>
+    </div>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

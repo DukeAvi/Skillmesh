@@ -5,76 +5,41 @@ from unittest.mock import MagicMock, patch
 from web import app
 
 
-def post_admin(role, csrf=True):
+def setup_request(code, password="Example123", activated=False):
     handler = object.__new__(app.Handler)
-    handler.path = "/api/admin/users"
-    body = json.dumps({"name": "New User", "email": "new@example.com", "password": "Example123", "role": "admin"}).encode()
+    handler.path = "/api/moderator/setup"
+    body = json.dumps({"code": code, "password": password}).encode()
     handler.headers = {"Content-Length": str(len(body))}
     handler.rfile = io.BytesIO(body)
     handler.send_json = MagicMock()
-    handler._require_csrf = MagicMock(return_value=csrf)
-    handler.session = MagicMock(return_value={"user_id": 1})
-    with patch.object(app, "query", return_value=[{"role": role}]), patch.object(app, "pg_connect") as connect:
+    with patch.dict(app.auth.os.environ, {"SKILLMESH_SETUP_CODE": "a-private-code-123"}), \
+         patch.object(app.auth, "_check_rate_limit", return_value=True), \
+         patch.object(app.auth, "pg_connect") as connect:
         cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchone.return_value = (42,)
+        cursor.fetchone.return_value = None if activated else (1,)
         handler.do_POST()
     return handler, connect
 
 
-def test_admin_can_create_account():
-    handler, connect = post_admin("admin")
-    assert handler.send_json.call_args.args[1] == 201
-    assert connect.called
-
-
-def test_non_admin_cannot_create_account():
-    handler, connect = post_admin("student")
-    assert handler.send_json.call_args.args[1] == 403
-    assert not connect.called
-
-
-def test_missing_csrf_prevents_creation():
-    handler, connect = post_admin("admin", csrf=False)
-    assert not handler.send_json.called
-    assert not connect.called
-
-
-def post_setup(code, existing_admin=False, csrf=True):
-    handler = object.__new__(app.Handler)
-    handler.path = "/api/admin/setup"
-    body = json.dumps({"code": code}).encode()
-    handler.headers = {"Content-Length": str(len(body))}
-    handler.rfile = io.BytesIO(body)
-    handler.send_json = MagicMock()
-    handler._require_csrf = MagicMock(return_value=csrf)
-    handler.session = MagicMock(return_value={"user_id": 1})
-    with patch.dict(app.os.environ, {"SKILLMESH_SETUP_CODE": "a-private-code-123"}), \
-         patch.object(app, "_check_rate_limit", return_value=True), \
-         patch.object(app, "pg_connect") as connect:
-        cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchone.side_effect = [(1,) if existing_admin else None, (1,)]
-        handler.do_POST()
-    return handler, connect
-
-
-def test_first_admin_setup():
-    handler, connect = post_setup("a-private-code-123")
+def test_setup_activates_seeded_moderator():
+    handler, connect = setup_request("a-private-code-123")
     assert handler.send_json.call_args.args[0] == {"ok": True}
-    assert connect.called
+    cursor = connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+    assert cursor.execute.call_args.args[1][1:] == ("arjun@campus.edu", "placeholder-hash-arjun")
 
 
 def test_setup_rejects_wrong_code():
-    handler, connect = post_setup("wrong")
+    handler, connect = setup_request("wrong")
     assert handler.send_json.call_args.args[1] == 403
     assert not connect.called
 
 
-def test_setup_rejects_existing_admin():
-    handler, _ = post_setup("a-private-code-123", existing_admin=True)
+def test_setup_cannot_replace_an_existing_password():
+    handler, _ = setup_request("a-private-code-123", activated=True)
     assert handler.send_json.call_args.args[1] == 409
 
 
-def test_setup_requires_csrf():
-    handler, connect = post_setup("a-private-code-123", csrf=False)
-    assert not handler.send_json.called
+def test_setup_rejects_weak_password():
+    handler, connect = setup_request("a-private-code-123", password="short")
+    assert handler.send_json.call_args.args[1] == 400
     assert not connect.called

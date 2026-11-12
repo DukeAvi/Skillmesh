@@ -4,6 +4,8 @@
 # Personal/working documentation - kept out of the repository on purpose.
 playbook.md
 arch_overview.md
+docs/engineering.md
+docs/phone.png
 
 # ---------------------------------------------------------------------------
 # Python virtual environment

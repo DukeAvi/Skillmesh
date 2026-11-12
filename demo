@@ -448,7 +448,7 @@ def add_user(args) -> None:
     if "@" not in email or email.startswith("@") or email.endswith("@"):
         raise UserInputError("Email must look like name@example.com")
     password_hash = prompt_value(
-        "Password hash (authentication is not implemented)",
+        "Stored password hash (CLI fixture; placeholder cannot sign in)",
         args.password_hash,
         default="manual-cli-placeholder-hash",
         required=True,
@@ -1152,7 +1152,7 @@ def prepare() -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run the SkillMesh viva without copying long SQL commands."
+        description="Run the SkillMesh database demos and interactive CLI."
     )
     subparsers = parser.add_subparsers(dest="demo", required=True)
     commands = {
@@ -1195,7 +1195,7 @@ def main(argv=None) -> int:
     add_user_parser.add_argument("--email", help="unique user email")
     add_user_parser.add_argument(
         "--password-hash",
-        help="placeholder hash (this project does not implement authentication)",
+        help="stored password hash (default placeholder cannot sign in)",
     )
     add_user_parser.add_argument(
         "--role", choices=("student", "mentor", "admin"), help="account role"

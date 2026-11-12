@@ -1,12 +1,7 @@
-"""Central configuration for every script.
+"""Environment settings and connection factories shared by web and CLI code.
 
-Values come from the environment (a local `.env` is loaded automatically, see
-`.env.example`). Each setting has a working default that matches
-`docker-compose.yml`, so the project runs with zero configuration.
-
-Connections always point at `localhost` because the Docker ports are published
-to the host; the containers themselves talk over the compose network and never
-use these variables.
+A root .env is optional; exported variables take precedence. Host defaults match
+Compose's published ports. Containers override PG_DSN with a service hostname.
 """
 
 import os

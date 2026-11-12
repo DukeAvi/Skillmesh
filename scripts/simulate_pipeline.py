@@ -1,28 +1,15 @@
-"""Comprehensive end-to-end simulation for SkillMesh.
+"""Verify the exchange workflow with synthetic data across all three stores.
 
-Simulates the complete system including the updated profile management,
-search, and request workflows:
-  1. Record pre-simulation baseline metrics
-  2. Onboard simulated users and skills into PostgreSQL with 384-d semantic embeddings
-  3. User Profile management verification (/api/users with name, email, role, department)
-  4. Catalogue search & client filtering simulation (matching frontend app.js logic)
-  5. Inspect `skill_popularity` view (dynamic supply, demand, and demand gap)
-  6. Matchmaker endpoint verification (/api/matches with fn_provider_average_rating)
-  7. HTTP POST /api/requests workflow and validation handling (201, 400, 422)
-  8. Exchange log endpoint verification (/api/requests?user_id=...)
-  9. Pessimistic row locking concurrency race test (`SELECT ... FOR UPDATE`)
- 10. Procedure 2: `sp_complete_swap_session` execution and idempotency guard
- 11. Feedback submission & provider average rating computation (excluding self-reviews)
- 12. Live analytical views re-computation (`leaderboard` and `skill_popularity`)
- 13. Redis ephemeral presence lifecycle (heartbeats, TTL, renewal, disconnect)
- 14. Neo4j graph synchronization (TEACHES, WANTS, and derived MENTORS relationships)
- 15. Frontend Observatory API verification (/api/health, /api/users, /api/activity, etc.)
- 16. Teardown, graph cleanup, and baseline restoration verification
+Run a private HTTP server, sign in synthetic accounts, exercise matching and
+CSRF-protected requests, race a booking, complete a session, and check ratings,
+views, TTL presence, and graph relationships. Cleanup restores the baseline.
 """
 
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
+from http.server import ThreadingHTTPServer
 import json
 import pathlib
 import sys
@@ -31,7 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -41,7 +28,9 @@ from scripts.book import SlotNotOpen, book_slot
 from scripts.config import neo4j_driver, pg_connect, redis_client
 from scripts.embeddings import embed, embedding_literal
 from scripts.neo4j_sync import sync as sync_neo4j
-from web.app import execute_request, get_payload
+from web.app import Handler
+from web.auth import password_hash
+from web.moderation import ensure_moderation_tables
 
 SIM_TAG = "sim-pipeline"
 SIM_USERS = [
@@ -79,7 +68,9 @@ SIM_USERS = [
 SIM_SKILL_NAME = "Distributed Systems (Simulation)"
 SIM_SKILL_DESC = "Architectures for high-availability, consensus protocols, and replication."
 SIM_CATEGORY = "Programming"
-WEB_URL = "http://localhost:8080"
+WEB_URL = ""
+SIM_PASSWORD = "Simulation123"
+CLIENTS = {}
 
 
 def banner(title: str) -> None:
@@ -100,43 +91,44 @@ def query_dict(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def http_get(endpoint: str) -> Dict[str, Any]:
-    """Perform HTTP GET if web container is running; fallback to get_payload."""
-    url = f"{WEB_URL}{endpoint}"
+def http_call(endpoint, payload=None, user_id=None):
+    """Use the actual HTTP handler; errors never fall back to direct DB writes."""
+    client, csrf = CLIENTS.get(user_id, (urllib.request.build_opener(), None))
+    headers = {"Content-Type": "application/json"}
+    if csrf:
+        headers["X-CSRF-Token"] = csrf
+    request = urllib.request.Request(
+        f"{WEB_URL}{endpoint}", headers=headers,
+        data=json.dumps(payload).encode() if payload is not None else None,
+    )
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SkillMesh-Simulation"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return json.loads(resp.read().decode())
-    except Exception:
-        parsed = urllib.parse.urlparse(endpoint)
-        return get_payload(parsed.path, parsed.query)
+        with client.open(request, timeout=10) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
 
 
-def http_post(endpoint: str, payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
-    """Perform HTTP POST to /api/requests; fallback to execute_request."""
-    url = f"{WEB_URL}{endpoint}"
-    body = json.dumps(payload).encode()
-    try:
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json", "User-Agent": "SkillMesh-Simulation"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return resp.status, json.loads(resp.read().decode())
-    except urllib.error.HTTPError as err:
-        try:
-            return err.code, json.loads(err.read().decode())
-        except Exception:
-            return err.code, {"error": str(err)}
-    except Exception:
-        # Fallback to local python function
-        try:
-            res = execute_request(payload)
-            return 201, res
-        except Exception as exc:
-            return 400, {"error": str(exc)}
+def http_get(endpoint):
+    values = urllib.parse.parse_qs(urllib.parse.urlparse(endpoint).query)
+    user_id = int(values.get("user_id", values.get("learner_id", ["0"]))[0])
+    status, data = http_call(endpoint, user_id=user_id)
+    assert status == 200, (endpoint, status, data)
+    return data
+
+
+def http_post(endpoint, payload):
+    return http_call(endpoint, payload, payload.get("requester_id"))
+
+
+def sign_in(user_id, email):
+    client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    request = urllib.request.Request(
+        f"{WEB_URL}/api/login", headers={"Content-Type": "application/json"},
+        data=json.dumps({"email": email, "password": SIM_PASSWORD}).encode(),
+    )
+    with client.open(request, timeout=10) as response:
+        user = json.load(response)
+    CLIENTS[user_id] = client, user["csrf_token"]
 
 
 def cleanup_simulation(verbose: bool = True) -> None:
@@ -228,7 +220,7 @@ def cleanup_simulation(verbose: bool = True) -> None:
         print(f"Cleanup complete: {del_users} sim users, {del_skills} sim skills removed.")
 
 
-def run_simulation(keep: bool = False) -> bool:
+def _run_simulation(keep: bool = False) -> bool:
     banner("SKILLMESH COMPLETE STACK & PROFILE SIMULATION")
     cleanup_simulation(verbose=False)
 
@@ -267,10 +259,10 @@ def run_simulation(keep: bool = False) -> bool:
                 cur.execute(
                     """
                     INSERT INTO users (name, email, password_hash, role, department, year_of_study, bio)
-                    VALUES (%s, %s, 'hash-placeholder', %s, %s, 3, %s)
+                    VALUES (%s, %s, %s, %s, %s, 3, %s)
                     RETURNING user_id
                     """,
-                    (u["name"], u["email"], u["role"], u["department"], u["bio"]),
+                    (u["name"], u["email"], password_hash(SIM_PASSWORD), u["role"], u["department"], u["bio"]),
                 )
                 uid = cur.fetchone()[0]
                 created_users[u["email"]] = uid
@@ -291,25 +283,14 @@ def run_simulation(keep: bool = False) -> bool:
     jordan_id = created_users[SIM_USERS[1]["email"]]
     samira_id = created_users[SIM_USERS[2]["email"]]
 
-    # -------------------------------------------------------------------------
-    # Step 2: User Profile Management Endpoint Verification (/api/users)
-    # -------------------------------------------------------------------------
-    step(2, "Verify Profile Management & Selection (/api/users)")
-    users_list = http_get("/api/users")
-    print(f"  Total users returned: {len(users_list)}")
-    sample_user = [u for u in users_list if u["user_id"] == jordan_id][0]
-    print(f"  Jordan Hayes profile payload:")
-    print(f"    User ID    : {sample_user['user_id']}")
-    print(f"    Name       : {sample_user['name']}")
-    print(f"    Email      : {sample_user['email']}")
-    print(f"    Role       : {sample_user['role']}")
-    print(f"    Department : {sample_user['department']}")
-
-    # Verify required keys returned by updated /api/users
-    for key in ("user_id", "name", "email", "role", "department"):
-        assert key in sample_user, f"Missing '{key}' in /api/users response"
-    assert sample_user["department"] == "Computer Science"
-    print("  [PASS] /api/users correctly returns full profile metadata (email, role, department).")
+    step(2, "Verify signed-in profiles and deny public user listing")
+    assert http_call("/api/users")[0] == 401
+    for email, user_id in created_users.items():
+        sign_in(user_id, email)
+        status, profile = http_call("/api/me", user_id=user_id)
+        assert status == 200 and profile["user_id"] == user_id
+        assert profile["email"] == email and profile["csrf_token"]
+    print("  [PASS] Real login, session cookies, private profiles, and CSRF tokens.")
 
     # -------------------------------------------------------------------------
     # Step 3: Catalogue Search & Client Filtering Simulation
@@ -621,6 +602,25 @@ def run_simulation(keep: bool = False) -> bool:
 
     banner("ALL 16 SIMULATION & VERIFICATION STAGES PASSED")
     return True
+
+
+def run_simulation(keep: bool = False) -> bool:
+    """Run against a private HTTP server and the configured synthetic databases."""
+    global WEB_URL
+    ensure_moderation_tables()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    WEB_URL = f"http://127.0.0.1:{server.server_port}"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        return _run_simulation(keep)
+    finally:
+        if not keep:
+            cleanup_simulation(verbose=False)
+        CLIENTS.clear()
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def main() -> int:

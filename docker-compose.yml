@@ -1,7 +1,6 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: skillmesh-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: skillmesh
@@ -23,13 +22,12 @@ services:
 
   neo4j:
     image: neo4j:5-community
-    container_name: skillmesh-neo4j
     restart: unless-stopped
     environment:
       NEO4J_AUTH: neo4j/skillmesh123
     ports:
-      - "127.0.0.1:7474:7474"   # HTTP - Neo4j Browser
-      - "127.0.0.1:7687:7687"   # Bolt - used by the Python driver
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"   # HTTP - Neo4j Browser
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"   # Bolt - used by the Python driver
     volumes:
       - neo4jdata:/data
     healthcheck:
@@ -46,7 +44,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: skillmesh-redis
     restart: unless-stopped
     ports:
       # 6380 avoids colliding with a host-installed Redis on its default 6379.
@@ -64,14 +61,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    container_name: skillmesh-web
     restart: unless-stopped
     environment:
       PG_DSN: postgresql://skillmesh:skillmesh@postgres:5432/skillmesh
       SKILLMESH_WEB_PORT: 8080
       SKILLMESH_SETUP_CODE: ${SKILLMESH_SETUP_CODE:-}
     ports:
-      - "8080:8080"
+      - "${WEB_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy

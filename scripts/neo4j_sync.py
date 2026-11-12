@@ -1,22 +1,9 @@
-"""PostgreSQL -> Neo4j sync.
+"""Project PostgreSQL users, skills, and completed-session mentors into Neo4j.
 
-PostgreSQL stays the system of record. Neo4j is a *derived* read model that we
-rebuild idempotently with MERGE, so running this script twice changes nothing.
-
-    python scripts/neo4j_sync.py
-
-What gets mirrored
-------------------
-nodes        :User  <- users            (user_id, name, email, role, department)
-              :Skill <- skills          (skill_id, name, description)
-relationships
-              (:User)-[:TEACHES]->(:Skill)  <- user_skills WHERE skill_type='TEACH'
-              (:User)-[:WANTS]->(:Skill)    <- user_skills WHERE skill_type='LEARN'
-              (:User)-[:MENTORS]->(:User)   <- swap_sessions WHERE status='completed'
-
-MENTORS is never stored in PostgreSQL. It is *derived* here from who actually
-completed a session with whom - which is the whole point of keeping it in a
-graph: the relationship has no column anywhere, only two joins.
+MERGE refreshes properties and avoids duplicate User/Skill nodes and TEACHES,
+WANTS, and MENTORS edges. Run explicitly; this is not a live sync and does not
+prune records deleted from PostgreSQL. See cypher/02_demo_queries.cypher for
+mentor traversal and skill-exchange queries.
 """
 
 import argparse
